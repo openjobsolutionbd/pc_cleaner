@@ -28,6 +28,118 @@ import scheduler
 import history_log
 
 
+# ----------------------------------------------------------------------
+# Visual theme — one place to tweak colors/fonts for the whole app.
+# ----------------------------------------------------------------------
+class Theme:
+    BG = "#f4f6f9"
+    SURFACE = "#ffffff"
+    BORDER = "#dfe4ea"
+    TEXT = "#1f2733"
+    TEXT_MUTED = "#6b7280"
+    PRIMARY = "#2f6fed"
+    PRIMARY_DARK = "#2457bf"
+    PRIMARY_TEXT = "#ffffff"
+    SUCCESS = "#1a8f5e"
+    WARNING = "#b35c00"
+    WARNING_BG = "#fff4e5"
+    DANGER = "#d64545"
+
+    FONT_FAMILY = "Segoe UI"
+    FONT_BASE = (FONT_FAMILY, 10)
+    FONT_MUTED = (FONT_FAMILY, 9)
+    FONT_SECTION = (FONT_FAMILY, 11, "bold")
+    FONT_TOTAL = (FONT_FAMILY, 11, "bold")
+    FONT_TAB = (FONT_FAMILY, 10)
+    FONT_MONO = ("Consolas", 9)
+
+
+def apply_theme(root):
+    """Configure ttk styles once, at startup. Widgets below just reference
+    these style names (or pick up the defaults automatically)."""
+    root.configure(bg=Theme.BG)
+
+    style = ttk.Style(root)
+    try:
+        style.theme_use("vista")
+    except tk.TclError:
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+    style.configure(".", font=Theme.FONT_BASE, background=Theme.BG, foreground=Theme.TEXT)
+    style.configure("TFrame", background=Theme.BG)
+    style.configure("TLabel", background=Theme.BG, foreground=Theme.TEXT, font=Theme.FONT_BASE)
+    style.configure("Muted.TLabel", background=Theme.BG, foreground=Theme.TEXT_MUTED, font=Theme.FONT_MUTED)
+    style.configure("Section.TLabel", background=Theme.BG, foreground=Theme.TEXT, font=Theme.FONT_SECTION)
+    style.configure("Total.TLabel", background=Theme.BG, foreground=Theme.PRIMARY_DARK, font=Theme.FONT_TOTAL)
+    style.configure("Warning.TLabel", background=Theme.WARNING_BG, foreground=Theme.WARNING, font=Theme.FONT_BASE)
+    style.configure("Warning.TFrame", background=Theme.WARNING_BG)
+
+    style.configure("TCheckbutton", background=Theme.BG, font=Theme.FONT_BASE)
+    style.map("TCheckbutton", background=[("active", Theme.BG)])
+
+    style.configure("TSeparator", background=Theme.BORDER)
+
+    style.configure("TNotebook", background=Theme.BG, borderwidth=0)
+    style.configure(
+        "TNotebook.Tab",
+        font=Theme.FONT_TAB,
+        padding=(16, 8),
+        background=Theme.BG,
+        foreground=Theme.TEXT_MUTED,
+    )
+    style.map(
+        "TNotebook.Tab",
+        background=[("selected", Theme.SURFACE)],
+        foreground=[("selected", Theme.PRIMARY_DARK)],
+        font=[("selected", (Theme.FONT_FAMILY, 10, "bold"))],
+    )
+
+    style.configure("TButton", font=Theme.FONT_BASE, padding=(12, 6))
+    style.configure(
+        "Accent.TButton",
+        font=(Theme.FONT_FAMILY, 10, "bold"),
+        padding=(14, 7),
+        foreground=Theme.PRIMARY_TEXT,
+        background=Theme.PRIMARY,
+    )
+    style.map(
+        "Accent.TButton",
+        background=[("active", Theme.PRIMARY_DARK), ("disabled", Theme.BORDER)],
+        foreground=[("disabled", Theme.TEXT_MUTED)],
+    )
+    style.configure(
+        "Danger.TButton",
+        font=Theme.FONT_BASE,
+        padding=(12, 6),
+        foreground=Theme.DANGER,
+    )
+
+    style.configure(
+        "Treeview",
+        background=Theme.SURFACE,
+        fieldbackground=Theme.SURFACE,
+        foreground=Theme.TEXT,
+        rowheight=24,
+        font=Theme.FONT_BASE,
+        borderwidth=0,
+    )
+    style.configure(
+        "Treeview.Heading",
+        font=(Theme.FONT_FAMILY, 9, "bold"),
+        background=Theme.BG,
+        foreground=Theme.TEXT_MUTED,
+        relief="flat",
+    )
+    style.map("Treeview", background=[("selected", Theme.PRIMARY)], foreground=[("selected", Theme.PRIMARY_TEXT)])
+
+    style.configure("Card.TFrame", background=Theme.SURFACE)
+
+    return style
+
+
 def build_full_categories():
     """Junk categories plus the Recycle Bin, which isn't a plain folder
     (it needs the Shell API), so it's added as a special-cased entry.
@@ -49,8 +161,24 @@ class LogBox:
     """A small read-only scrolling text area for status messages."""
 
     def __init__(self, parent, height=6):
-        self.frame = ttk.Frame(parent)
-        self.text = tk.Text(self.frame, height=height, state="disabled", wrap="word")
+        self.frame = ttk.Frame(parent, style="Card.TFrame")
+        self.text = tk.Text(
+            self.frame,
+            height=height,
+            state="disabled",
+            wrap="word",
+            font=Theme.FONT_MONO,
+            bg=Theme.SURFACE,
+            fg=Theme.TEXT,
+            insertbackground=Theme.TEXT,
+            relief="flat",
+            borderwidth=1,
+            highlightthickness=1,
+            highlightbackground=Theme.BORDER,
+            highlightcolor=Theme.BORDER,
+            padx=8,
+            pady=6,
+        )
         scrollbar = ttk.Scrollbar(self.frame, command=self.text.yview)
         self.text.configure(yscrollcommand=scrollbar.set)
         self.text.pack(side="left", fill="both", expand=True)
@@ -71,7 +199,7 @@ class ScrollableFrame(ttk.Frame):
 
     def __init__(self, parent, height=260):
         super().__init__(parent)
-        canvas = tk.Canvas(self, height=height, highlightthickness=0)
+        canvas = tk.Canvas(self, height=height, highlightthickness=0, bg=Theme.BG)
         scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
         self.inner = ttk.Frame(canvas)
         self.inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -85,13 +213,18 @@ class CleanerApp:
     def __init__(self, root):
         self.root = root
         root.title("Windows Cleaner")
-        root.geometry("820x680")
-        root.minsize(700, 550)
+        root.geometry("900x720")
+        root.minsize(760, 580)
+        apply_theme(root)
 
         self.categories = build_full_categories()
         self.category_vars = {}
         self.category_size_labels = {}
         self.category_sizes = {}
+        # Free-space snapshot taken right before a clean starts (see
+        # clean_junk()). Must exist from the start, not just after the
+        # first clean_junk() call, since _clean_done() always reads it.
+        self._free_before = None
 
         # Background threads never touch Tk widgets directly (Tkinter is
         # not thread-safe). Instead they push (function, args) onto this
@@ -133,6 +266,19 @@ class CleanerApp:
     # Overall layout
     # ------------------------------------------------------------------
     def _build_ui(self):
+        header = ttk.Frame(self.root)
+        header.pack(fill="x", padx=12, pady=(10, 4))
+        title_frame = ttk.Frame(header)
+        title_frame.pack(side="left")
+        ttk.Label(title_frame, text="🧹 Windows Cleaner", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(title_frame, text="Free up space and keep your PC tidy", style="Muted.TLabel").pack(anchor="w")
+
+        self.header_drive_label = ttk.Label(header, text="", style="Total.TLabel")
+        self.header_drive_label.pack(side="right", anchor="e")
+        self._refresh_header_drive_label()
+
+        ttk.Separator(self.root).pack(fill="x", padx=0, pady=(0, 4))
+
         notebook = ttk.Notebook(self.root)
         self.tab_junk = ttk.Frame(notebook)
         self.tab_browser = ttk.Frame(notebook)
@@ -140,18 +286,27 @@ class CleanerApp:
         self.tab_startup = ttk.Frame(notebook)
         self.tab_auto = ttk.Frame(notebook)
 
-        notebook.add(self.tab_junk, text="Junk Cleanup")
-        notebook.add(self.tab_browser, text="Browser && Network")
-        notebook.add(self.tab_tools, text="System Tools")
-        notebook.add(self.tab_startup, text="Startup Manager")
-        notebook.add(self.tab_auto, text="Automation && History")
-        notebook.pack(fill="both", expand=True)
+        notebook.add(self.tab_junk, text="  Junk Cleanup  ")
+        notebook.add(self.tab_browser, text="  Browser && Network  ")
+        notebook.add(self.tab_tools, text="  System Tools  ")
+        notebook.add(self.tab_startup, text="  Startup Manager  ")
+        notebook.add(self.tab_auto, text="  Automation && History  ")
+        notebook.pack(fill="both", expand=True, padx=8, pady=8)
 
         self._build_junk_tab()
         self._build_browser_tab()
         self._build_tools_tab()
         self._build_startup_tab()
         self._build_auto_tab()
+
+    def _refresh_header_drive_label(self):
+        system_drive = os.environ.get("SystemDrive", "C:") + "\\"
+        usage = system_tools.get_free_space(system_drive)
+        if usage:
+            total, used, free = usage
+            self.header_drive_label.config(
+                text=f"{system_drive}  {cleaner_core.format_size(free)} free of {cleaner_core.format_size(total)}"
+            )
 
     # ------------------------------------------------------------------
     # Tab 1: Junk Cleanup
@@ -160,50 +315,73 @@ class CleanerApp:
         frame = self.tab_junk
 
         if not cleaner_core.is_admin():
-            banner = ttk.Frame(frame)
-            banner.pack(fill="x", padx=10, pady=(10, 0))
-            ttk.Label(
+            banner = tk.Frame(frame, bg=Theme.WARNING_BG, highlightbackground=Theme.WARNING, highlightthickness=1)
+            banner.pack(fill="x", padx=12, pady=(12, 0))
+            tk.Label(
                 banner,
-                text="Not running as Administrator — some categories will be skipped.",
-                foreground="#b35c00",
+                text="⚠  Not running as Administrator — some categories will be skipped.",
+                bg=Theme.WARNING_BG,
+                fg=Theme.WARNING,
+                font=Theme.FONT_BASE,
+                padx=10,
+                pady=8,
             ).pack(side="left")
-            ttk.Button(banner, text="Restart as Administrator", command=self.restart_as_admin).pack(side="right")
+            ttk.Button(banner, text="Restart as Administrator", command=self.restart_as_admin).pack(
+                side="right", padx=8, pady=6
+            )
 
-        scrollable = ScrollableFrame(frame, height=280)
-        scrollable.pack(fill="both", expand=True, padx=10, pady=10)
+        scrollable = ScrollableFrame(frame, height=300)
+        scrollable.pack(fill="both", expand=True, padx=12, pady=12)
 
         for cat in self.categories:
-            row = ttk.Frame(scrollable.inner)
-            row.pack(fill="x", pady=3)
+            card = tk.Frame(
+                scrollable.inner,
+                bg=Theme.SURFACE,
+                highlightbackground=Theme.BORDER,
+                highlightthickness=1,
+            )
+            card.pack(fill="x", pady=4)
+            row = tk.Frame(card, bg=Theme.SURFACE)
+            row.pack(fill="x", padx=10, pady=8)
 
             var = tk.BooleanVar(value=cat.get("default_checked", True))
             self.category_vars[cat["id"]] = var
             cb = ttk.Checkbutton(row, variable=var)
             cb.pack(side="left")
 
-            text_frame = ttk.Frame(row)
-            text_frame.pack(side="left", fill="x", expand=True, padx=5)
+            text_frame = tk.Frame(row, bg=Theme.SURFACE)
+            text_frame.pack(side="left", fill="x", expand=True, padx=8)
             name = cat["name"]
             if cat.get("needs_admin"):
                 name += "  (needs Administrator)"
-            ttk.Label(text_frame, text=name).pack(anchor="w")
-            ttk.Label(text_frame, text=cat["desc"], foreground="gray", wraplength=480, justify="left").pack(anchor="w")
+            tk.Label(text_frame, text=name, bg=Theme.SURFACE, fg=Theme.TEXT, font=Theme.FONT_BASE).pack(anchor="w")
+            tk.Label(
+                text_frame,
+                text=cat["desc"],
+                bg=Theme.SURFACE,
+                fg=Theme.TEXT_MUTED,
+                font=Theme.FONT_MUTED,
+                wraplength=520,
+                justify="left",
+            ).pack(anchor="w")
 
-            size_label = ttk.Label(row, text="—", width=10, anchor="e")
+            size_label = tk.Label(
+                row, text="—", width=10, anchor="e", bg=Theme.SURFACE, fg=Theme.TEXT, font=Theme.FONT_BASE
+            )
             size_label.pack(side="right", padx=5)
             self.category_size_labels[cat["id"]] = size_label
 
         btn_row = ttk.Frame(frame)
-        btn_row.pack(fill="x", padx=10, pady=5)
+        btn_row.pack(fill="x", padx=12, pady=(0, 12))
         self.scan_btn = ttk.Button(btn_row, text="Scan", command=self.scan_junk)
         self.scan_btn.pack(side="left")
-        self.clean_btn = ttk.Button(btn_row, text="Clean Selected", command=self.clean_junk)
-        self.clean_btn.pack(side="left", padx=5)
-        self.total_label = ttk.Label(btn_row, text="Total reclaimable: —", font=("Segoe UI", 10, "bold"))
+        self.clean_btn = ttk.Button(btn_row, text="Clean Selected", style="Accent.TButton", command=self.clean_junk)
+        self.clean_btn.pack(side="left", padx=8)
+        self.total_label = ttk.Label(btn_row, text="Total reclaimable: —", style="Total.TLabel")
         self.total_label.pack(side="right")
 
         self.junk_log = LogBox(frame, height=7)
-        self.junk_log.pack(fill="both", expand=False, padx=10, pady=10)
+        self.junk_log.pack(fill="both", expand=False, padx=12, pady=(0, 12))
 
         self.scan_junk()
 
@@ -244,6 +422,9 @@ class CleanerApp:
         ):
             return
         self.clean_btn.config(state="disabled")
+        system_drive = os.environ.get("SystemDrive", "C:") + "\\"
+        usage_before = system_tools.get_free_space(system_drive)
+        self._free_before = usage_before[2] if usage_before else None
         threading.Thread(target=self._clean_junk_worker, args=(selected,), daemon=True).start()
 
     def _clean_junk_worker(self, selected):
@@ -292,6 +473,35 @@ class CleanerApp:
         if not logged:
             self.junk_log.log("Warning: could not save this cleanup to the history log.")
         self._refresh_history_view()
+
+        # Only the "Clean Selected" button flow captures a before-snapshot
+        # (see clean_junk()). If _clean_done() is reached some other way —
+        # e.g. _clean_junk_worker() invoked directly/programmatically —
+        # there's no before-value to compare against, so skip the
+        # before/after popup entirely rather than showing a blocking
+        # dialog nobody triggered.
+        if self._free_before is not None:
+            system_drive = os.environ.get("SystemDrive", "C:") + "\\"
+            usage_after = system_tools.get_free_space(system_drive)
+            free_after = usage_after[2] if usage_after else None
+
+            summary_lines = [f"Freed approximately {cleaner_core.format_size(total_freed)}."]
+            if free_after is not None:
+                actual_gain = free_after - self._free_before
+                summary_lines.append("")
+                summary_lines.append(f"Free space on {system_drive}")
+                summary_lines.append(f"  Before:  {cleaner_core.format_size(self._free_before)}")
+                summary_lines.append(f"  After:   {cleaner_core.format_size(free_after)}")
+                summary_lines.append(f"  Gained:  {cleaner_core.format_size(max(actual_gain, 0))}")
+                self.junk_log.log(
+                    f"Free space on {system_drive}: {cleaner_core.format_size(self._free_before)} -> {cleaner_core.format_size(free_after)}"
+                )
+
+            messagebox.showinfo("Cleanup complete", "\n".join(summary_lines))
+            self._free_before = None  # reset so a stale value can't leak into a later run
+
+        self._refresh_header_drive_label()
+        self.refresh_drive_list()
         self.scan_junk()
 
     def restart_as_admin(self):
@@ -308,12 +518,12 @@ class CleanerApp:
     # ------------------------------------------------------------------
     def _build_browser_tab(self):
         frame = self.tab_browser
-        ttk.Label(frame, text="Browsing History", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=10, pady=(10, 0))
+        ttk.Label(frame, text="Browsing History", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
         ttk.Label(
             frame,
             text="Clears visited-site history only. Cookies, saved passwords, and logins are never touched — "
                  "you will not be logged out of any site.",
-            foreground="gray", wraplength=760, justify="left",
+            style="Muted.TLabel", wraplength=760, justify="left",
         ).pack(anchor="w", padx=10)
 
         self.browser_status_label = ttk.Label(frame, text="Click \"Check Status\" to scan.")
@@ -322,12 +532,12 @@ class CleanerApp:
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(anchor="w", padx=10, pady=5)
         ttk.Button(btn_frame, text="Check Status", command=self.check_browser_status).pack(side="left")
-        self.clear_history_btn = ttk.Button(btn_frame, text="Clear Browsing History", command=self.clear_history, state="disabled")
+        self.clear_history_btn = ttk.Button(btn_frame, text="Clear Browsing History", style="Accent.TButton", command=self.clear_history, state="disabled")
         self.clear_history_btn.pack(side="left", padx=5)
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-        ttk.Label(frame, text="Network", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=10)
-        ttk.Label(frame, text="Clears stale website-address lookups. Can fix some \"site won't load\" issues.", foreground="gray").pack(anchor="w", padx=10)
+        ttk.Label(frame, text="Network", style="Section.TLabel").pack(anchor="w", padx=10)
+        ttk.Label(frame, text="Clears stale website-address lookups. Can fix some \"site won't load\" issues.", style="Muted.TLabel").pack(anchor="w", padx=10)
         ttk.Button(frame, text="Flush DNS Cache", command=self.flush_dns).pack(anchor="w", padx=10, pady=5)
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
@@ -385,14 +595,26 @@ class CleanerApp:
     def _build_tools_tab(self):
         frame = self.tab_tools
 
-        ttk.Label(frame, text="Disk Space Analyzer", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=10, pady=(10, 0))
+        ttk.Label(frame, text="Disk Space Analyzer", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
+        drive_row = ttk.Frame(frame)
+        drive_row.pack(fill="x", padx=10, pady=(5, 0))
+        ttk.Label(drive_row, text="Drive:", style="Muted.TLabel").pack(side="left")
+        self.drive_var = tk.StringVar(value="")
+        self.drive_combo = ttk.Combobox(drive_row, textvariable=self.drive_var, state="readonly", width=28)
+        self.drive_combo.pack(side="left", padx=5)
+        self.drive_combo.bind("<<ComboboxSelected>>", self._on_drive_selected)
+        ttk.Button(drive_row, text="Refresh Drives", command=self.refresh_drive_list).pack(side="left")
+
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=10, pady=5)
-        self.analyzer_path_label = ttk.Label(row, text="No folder selected", foreground="gray")
+        self.analyzer_path_label = ttk.Label(row, text="No folder selected", style="Muted.TLabel")
         self.analyzer_path_label.pack(side="left")
         ttk.Button(row, text="Choose Folder", command=self.choose_analyzer_folder).pack(side="right")
-        self.analyze_btn = ttk.Button(frame, text="Analyze", command=self.run_analyzer)
+        self.analyze_btn = ttk.Button(frame, text="Analyze", style="Accent.TButton", command=self.run_analyzer)
         self.analyze_btn.pack(anchor="w", padx=10)
+
+        self.drive_summary_label = ttk.Label(frame, text="", style="Muted.TLabel")
+        self.drive_summary_label.pack(anchor="w", padx=10)
 
         columns = ("name", "size", "type")
         self.analyzer_tree = ttk.Treeview(frame, columns=columns, show="headings", height=6)
@@ -403,29 +625,56 @@ class CleanerApp:
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
 
-        ttk.Label(frame, text="Empty Folder Finder", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=10)
+        ttk.Label(frame, text="Empty Folder Finder", style="Section.TLabel").pack(anchor="w", padx=10)
         row2 = ttk.Frame(frame)
         row2.pack(fill="x", padx=10, pady=5)
-        self.empty_path_label = ttk.Label(row2, text="No folder selected", foreground="gray")
+        self.empty_path_label = ttk.Label(row2, text="No folder selected", style="Muted.TLabel")
         self.empty_path_label.pack(side="left")
         ttk.Button(row2, text="Choose Folder", command=self.choose_empty_folder).pack(side="right")
         btn_row = ttk.Frame(frame)
         btn_row.pack(anchor="w", padx=10)
         self.scan_empty_btn = ttk.Button(btn_row, text="Scan", command=self.scan_empty_folders)
         self.scan_empty_btn.pack(side="left")
-        ttk.Button(btn_row, text="Delete All Found", command=self.delete_empty_folders_found).pack(side="left", padx=5)
+        ttk.Button(btn_row, text="Delete All Found", style="Danger.TButton", command=self.delete_empty_folders_found).pack(side="left", padx=5)
         self.empty_listbox = tk.Listbox(frame, height=5)
         self.empty_listbox.pack(fill="both", expand=False, padx=10, pady=5)
         self.empty_folders_found = []
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
 
-        ttk.Label(frame, text="Icon Cache Reset", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=10)
-        ttk.Label(frame, text="Fixes wrong/blank icons. Restarts Explorer — your screen will flicker briefly.", foreground="gray").pack(anchor="w", padx=10)
-        ttk.Button(frame, text="Reset Icon Cache", command=self.reset_icon_cache).pack(anchor="w", padx=10, pady=5)
+        ttk.Label(frame, text="Icon Cache Reset", style="Section.TLabel").pack(anchor="w", padx=10)
+        ttk.Label(frame, text="Fixes wrong/blank icons. Restarts Explorer — your screen will flicker briefly.", style="Muted.TLabel").pack(anchor="w", padx=10)
+        ttk.Button(frame, text="Reset Icon Cache", style="Accent.TButton", command=self.reset_icon_cache).pack(anchor="w", padx=10, pady=5)
 
         self.tools_log = LogBox(frame, height=5)
         self.tools_log.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.refresh_drive_list()
+
+    def refresh_drive_list(self):
+        drives = system_tools.list_drives()
+        self._drives_by_label = {}
+        labels = []
+        for d in drives:
+            free_str = cleaner_core.format_size(d["free"])
+            total_str = cleaner_core.format_size(d["total"])
+            label = f"{d['path']}  ({free_str} free of {total_str})"
+            labels.append(label)
+            self._drives_by_label[label] = d
+        self.drive_combo.config(values=labels)
+        if labels and not self.drive_var.get():
+            self.drive_combo.current(0)
+            self._on_drive_selected()
+
+    def _on_drive_selected(self, event=None):
+        label = self.drive_var.get()
+        drive = self._drives_by_label.get(label)
+        if drive:
+            self.analyzer_folder = drive["path"]
+            self.analyzer_path_label.config(text=drive["path"])
+            free_str = cleaner_core.format_size(drive["free"])
+            total_str = cleaner_core.format_size(drive["total"])
+            self.drive_summary_label.config(text=f"{free_str} free of {total_str}")
 
     def choose_analyzer_folder(self):
         path = filedialog.askdirectory()
@@ -508,8 +757,8 @@ class CleanerApp:
     # ------------------------------------------------------------------
     def _build_startup_tab(self):
         frame = self.tab_startup
-        ttk.Label(frame, text="Programs that launch automatically when Windows starts.", foreground="gray").pack(anchor="w", padx=10, pady=(10, 0))
-        ttk.Label(frame, text="Disabling here is reversible — you can always re-enable from this list.", foreground="gray").pack(anchor="w", padx=10)
+        ttk.Label(frame, text="Programs that launch automatically when Windows starts.", style="Muted.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
+        ttk.Label(frame, text="Disabling here is reversible — you can always re-enable from this list.", style="Muted.TLabel").pack(anchor="w", padx=10)
 
         btn_row = ttk.Frame(frame)
         btn_row.pack(anchor="w", padx=10, pady=5)
@@ -579,8 +828,8 @@ class CleanerApp:
     # ------------------------------------------------------------------
     def _build_auto_tab(self):
         frame = self.tab_auto
-        ttk.Label(frame, text="Scheduled Auto-Clean", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=10, pady=(10, 0))
-        ttk.Label(frame, text="Runs the same Junk Cleanup categories automatically in the background.", foreground="gray").pack(anchor="w", padx=10)
+        ttk.Label(frame, text="Scheduled Auto-Clean", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
+        ttk.Label(frame, text="Runs the same Junk Cleanup categories automatically in the background.", style="Muted.TLabel").pack(anchor="w", padx=10)
 
         row = ttk.Frame(frame)
         row.pack(anchor="w", padx=10, pady=5)
@@ -596,7 +845,7 @@ class CleanerApp:
 
         btn_row = ttk.Frame(frame)
         btn_row.pack(anchor="w", padx=10, pady=5)
-        ttk.Button(btn_row, text="Enable Schedule", command=self.enable_schedule).pack(side="left")
+        ttk.Button(btn_row, text="Enable Schedule", style="Accent.TButton", command=self.enable_schedule).pack(side="left")
         ttk.Button(btn_row, text="Remove Schedule", command=self.remove_schedule).pack(side="left", padx=5)
         self.schedule_status_label = ttk.Label(frame, text="")
         self.schedule_status_label.pack(anchor="w", padx=10)
@@ -605,7 +854,7 @@ class CleanerApp:
         self.auto_log.pack(fill="both", expand=False, padx=10, pady=(5, 10))
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-        ttk.Label(frame, text="Cleanup History", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=10)
+        ttk.Label(frame, text="Cleanup History", style="Section.TLabel").pack(anchor="w", padx=10)
         columns = ("date", "categories", "freed", "mode")
         self.history_tree = ttk.Treeview(frame, columns=columns, show="headings", height=10)
         for col, label in zip(columns, ("Date", "Categories Cleaned", "Space Freed", "Mode")):

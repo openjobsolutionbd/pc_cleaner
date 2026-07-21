@@ -12,10 +12,53 @@ using space" only make sense relative to wherever the user is looking.
 """
 
 import os
+import shutil
+import string
 import subprocess
 import glob
 
 from cleaner_core import get_dir_size, is_windows
+
+
+def list_drives() -> list:
+    """Returns available drives as a list of dicts:
+    {"path", "label", "total", "used", "free"}
+    On Windows this checks each letter A-Z for a usable, ready volume.
+    On other OSes (e.g. during testing) it just returns the root "/".
+    """
+    drives = []
+    if is_windows():
+        for letter in string.ascii_uppercase:
+            path = f"{letter}:\\"
+            if os.path.isdir(path):
+                try:
+                    usage = shutil.disk_usage(path)
+                    drives.append({
+                        "path": path,
+                        "label": path,
+                        "total": usage.total,
+                        "used": usage.used,
+                        "free": usage.free,
+                    })
+                except OSError:
+                    continue
+    else:
+        try:
+            usage = shutil.disk_usage("/")
+            drives.append({"path": "/", "label": "/", "total": usage.total, "used": usage.used, "free": usage.free})
+        except OSError:
+            pass
+    return drives
+
+
+def get_free_space(path: str):
+    """Returns (total, used, free) bytes for the drive containing `path`,
+    or None if it can't be determined (e.g. path doesn't exist)."""
+    try:
+        usage = shutil.disk_usage(path)
+        return usage.total, usage.used, usage.free
+    except OSError:
+        return None
 
 
 def find_empty_folders(root: str) -> list:

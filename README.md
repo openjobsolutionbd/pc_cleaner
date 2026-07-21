@@ -44,11 +44,13 @@ python --version
 
 | ট্যাব | কাজ |
 |---|---|
-| **Junk Cleanup** | Temp files, Browser Cache, Thumbnail Cache, Error Reports, Windows Update পুরনো ফাইল, Delivery Optimization, Crash Dumps, Recycle Bin, Prefetch (ঐচ্ছিক) — চেকবক্স দিয়ে বেছে "Clean Selected" |
+| **Junk Cleanup** | Temp files, Browser Cache, Thumbnail Cache, Error Reports, Windows Update পুরনো ফাইল, Delivery Optimization, Crash Dumps, Recycle Bin, Prefetch (ঐচ্ছিক) — চেকবক্স দিয়ে বেছে "Clean Selected"। ক্লিন শেষে একটা পপ-আপে দেখাবে ঠিক কত জায়গা খালি হলো, এবং সিস্টেম ড্রাইভের Before/After ফ্রি স্পেসও তুলনা করে দেখাবে। |
 | **Browser & Network** | শুধু Browsing History মোছে (Cookies/Password কখনো না), DNS Cache Flush |
-| **System Tools** | Disk Space Analyzer (কোন ফোল্ডার কত জায়গা খাচ্ছে), Empty Folder Finder, Icon Cache Reset |
+| **System Tools** | Disk Space Analyzer (ড্রপডাউন থেকে সরাসরি C:, D: ইত্যাদি ড্রাইভ বেছে নিয়ে, বা যেকোনো ফোল্ডার বেছে, কোনটা কত জায়গা খাচ্ছে দেখা — প্রতিটার পাশে ড্রাইভের কত % তাও দেখায়), Empty Folder Finder, Icon Cache Reset |
 | **Startup Manager** | বুটে কোন প্রোগ্রাম চালু হয় তা দেখা ও বন্ধ/চালু করা (রিভার্সিবল) |
 | **Automation & History** | সাপ্তাহিক/দৈনিক অটো-ক্লিন শিডিউল করা, আগের ক্লিনআপের লগ দেখা |
+
+উইন্ডো খোলার সাথে সাথেই উপরের ডানদিকে সিস্টেম ড্রাইভের ফ্রি স্পেস একনজরে দেখা যায়।
 
 ব্রাউজার হিস্ট্রি মোছার আগে Chrome/Edge বন্ধ থাকতে হবে (অ্যাপ নিজেই চেক করে জানিয়ে দেবে)।
 

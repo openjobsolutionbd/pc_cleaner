@@ -109,5 +109,28 @@ class TestAnalyzeFolder(unittest.TestCase):
         self.assertEqual(st.analyze_folder(os.path.join(self.tmp, "nope")), [])
 
 
+class TestDriveHelpers(unittest.TestCase):
+    def test_list_drives_returns_at_least_one_drive(self):
+        drives = st.list_drives()
+        self.assertGreaterEqual(len(drives), 1)
+        for d in drives:
+            self.assertIn("path", d)
+            self.assertIn("total", d)
+            self.assertIn("used", d)
+            self.assertIn("free", d)
+            self.assertGreater(d["total"], 0)
+
+    def test_get_free_space_valid_path(self):
+        result = st.get_free_space(os.getcwd())
+        self.assertIsNotNone(result)
+        total, used, free = result
+        self.assertGreater(total, 0)
+        self.assertGreaterEqual(free, 0)
+
+    def test_get_free_space_invalid_path_returns_none(self):
+        result = st.get_free_space("/this/path/should/not/exist/at/all/12345")
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()
