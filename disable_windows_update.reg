@@ -1,0 +1,47 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================
+; Windows Update পাকাপাকি বন্ধ করার Registry ফাইল
+; ডাবল-ক্লিক করে Run করুন, তারপর PC Restart দিন
+; ============================================================
+
+; ── ১. Windows Update ইন্টারনেটে কানেক্ট করতে পারবে না ──
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate]
+"DisableWindowsUpdateAccess"=dword:00000001
+"DoNotConnectToWindowsUpdateInternetLocations"=dword:00000001
+"DisableWindowsUpdateAccessFunctionality"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU]
+"NoAutoUpdate"=dword:00000001
+"AUOptions"=dword:00000001
+"NoAutoRebootWithLoggedOnUsers"=dword:00000001
+
+; ── ২. Windows Update সার্ভিস সম্পূর্ণ বন্ধ ──
+; wuauserv = Windows Update
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\wuauserv]
+"Start"=dword:00000004
+
+; UsoSvc = Update Orchestrator (আপডেট শিডিউল করে)
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\UsoSvc]
+"Start"=dword:00000004
+
+; DoSvc = Delivery Optimization (অন্যদের সাথে আপডেট শেয়ার)
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\DoSvc]
+"Start"=dword:00000004
+
+; ── ৩. Windows Update Medic Service বন্ধ ──
+; WaaSMedicSvc নিজেই নিজেকে চালু করে — তাই permission deny করতে হবে
+; এই key-এর permission পরিবর্তন registry ফাইলে করা যায় না,
+; নিচের .bat ফাইল দিয়ে করতে হবে (আলাদাভাবে রান করুন)
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WaaSMedicSvc]
+"Start"=dword:00000004
+
+; ── ৪. Windows Store-এর অটো আপডেটও বন্ধ ──
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\WindowsStore]
+"AutoDownload"=dword:00000002
+"DisableOSUpgrade"=dword:00000001
+
+; ── ৫. Telemetry ও ডেটা পাঠানো বন্ধ (আপডেটের সাথে আসে) ──
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\DataCollection]
+"AllowTelemetry"=dword:00000000
+
