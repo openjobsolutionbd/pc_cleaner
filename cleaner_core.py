@@ -55,13 +55,27 @@ def get_dir_size(path: str) -> int:
     return total
 
 
-def delete_dir_contents(path: str, log=None) -> dict:
+def delete_dir_contents(path: str, log=None, file_filter=None) -> dict:
     """Delete everything INSIDE `path`, but keep `path` itself.
 
     This is the safety-critical function: it must never delete the
     category's root folder (e.g. never delete the Temp folder itself,
     only what's inside it), and it must never raise on a locked file —
     it should just skip that file and keep going.
+
+    file_filter: optional callable(filename: str) -> bool. When given,
+        only files whose name satisfies the filter are deleted; files
+        that don't match are silently skipped (not counted as skipped).
+        Subdirectories are also skipped entirely when a filter is active,
+        because the filter is defined per filename and a directory has no
+        meaningful single filename to test against. This is intentional
+        for categories like Thumbnail Cache where only specific *.db
+        files should be removed and the rest of the folder left intact.
+
+    Symlinks (both file-symlinks and dir-symlinks) are always skipped —
+    deleting a symlink target could break other applications that depend
+    on it, so we never touch them even when they appear inside a temp
+    folder.
 
     Returns a summary dict: {"deleted_bytes", "deleted_files",
     "deleted_dirs", "skipped": [list of paths that could not be removed]}.
@@ -76,13 +90,25 @@ def delete_dir_contents(path: str, log=None) -> dict:
 
     for entry in os.listdir(path):
         full = os.path.join(path, entry)
+
+        # Never follow or delete symlinks — file or directory.
+        if os.path.islink(full):
+            continue
+
         try:
-            if os.path.isdir(full) and not os.path.islink(full):
+            if os.path.isdir(full):
+                # When a filter is active we only remove individual files
+                # that match it, so skip subdirectories entirely.
+                if file_filter is not None:
+                    continue
                 size_before = get_dir_size(full)
                 shutil.rmtree(full)
                 summary["deleted_bytes"] += size_before
                 summary["deleted_dirs"] += 1
             else:
+                # Apply the per-filename filter if one was provided.
+                if file_filter is not None and not file_filter(entry):
+                    continue
                 size_before = os.path.getsize(full) if os.path.exists(full) else 0
                 os.remove(full)
                 summary["deleted_bytes"] += size_before
@@ -152,20 +178,41 @@ def empty_recycle_bin() -> bool:
         return False
 
 
-def stop_windows_update_service(log=None) -> bool:
+def stop_windows_update_service(log=None) -> str:
+    """Attempts to stop the Windows Update service (wuauserv).
+
+    Returns one of three string tokens so callers can act correctly:
+
+      "stopped"         — service was running and we stopped it;
+                          caller should restart it after cleanup.
+      "already_stopped" — service was not running to begin with;
+                          cleanup is safe to proceed, no restart needed.
+      "failed"          — service is running but we could not stop it;
+                          caller should skip this category entirely to
+                          avoid corrupting a partially-written cache.
+
+    'net stop' exit code 2 with the "not started" message means the
+    service is already down — this is treated as safe, not as an error,
+    because deleting the cache while the service is stopped is exactly
+    what we want regardless of who stopped it.
+    """
     if log is None:
         log = lambda msg: None
     if not is_windows():
-        return False
+        return "already_stopped"
     try:
         result = subprocess.run(["net", "stop", "wuauserv"], capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
-            return True
+            return "stopped"
+        # "The service has not been started." — service already down, safe to proceed.
+        combined = (result.stderr + result.stdout).lower()
+        if "not been started" in combined or "not started" in combined:
+            return "already_stopped"
         log(f"Could not stop Windows Update service: {result.stderr.strip() or result.stdout.strip()}")
-        return False
+        return "failed"
     except Exception as e:
         log(f"Could not stop Windows Update service: {e}")
-        return False
+        return "failed"
 
 
 def start_windows_update_service(log=None) -> bool:

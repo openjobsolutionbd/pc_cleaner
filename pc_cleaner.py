@@ -28,6 +28,7 @@ import system_tools
 import startup_manager
 import scheduler
 import history_log
+import shutdown_setup
 
 
 __version__ = "1.2.0"
@@ -469,8 +470,9 @@ class CleanerApp:
                 continue
 
             cat_freed = 0
+            file_filter = cat.get("file_filter")
             for p in cat["paths"]:
-                summary = cleaner_core.delete_dir_contents(p, log=None)
+                summary = cleaner_core.delete_dir_contents(p, log=None, file_filter=file_filter)
                 cat_freed += summary["deleted_bytes"]
             total_freed += cat_freed
             cleaned_ids.append(cat["id"])
@@ -660,12 +662,26 @@ class CleanerApp:
                     log("Could not empty Recycle Bin.")
                 continue
 
-            service_stopped = cat.get("stop_service") and cleaner_core.stop_windows_update_service(log)
+            # For categories that require the Windows Update service to be
+            # stopped first, check the outcome before touching any files:
+            #   "stopped"         — we stopped it; clean, then restart.
+            #   "already_stopped" — already down; safe to clean, no restart.
+            #   "failed"          — still running; skip entirely to avoid
+            #                       corrupting a cache that's in active use.
+            service_state = None
+            if cat.get("stop_service"):
+                service_state = cleaner_core.stop_windows_update_service(log)
+                if service_state == "failed":
+                    log(f"Skipped {cat['name']} — could not stop Windows Update service.")
+                    continue
+
             cat_freed = 0
+            file_filter = cat.get("file_filter")
             for p in cat["paths"]:
-                summary = cleaner_core.delete_dir_contents(p, log)
+                summary = cleaner_core.delete_dir_contents(p, log, file_filter=file_filter)
                 cat_freed += summary["deleted_bytes"]
-            if service_stopped:
+
+            if service_state == "stopped":
                 cleaner_core.start_windows_update_service(log)
 
             total_freed += cat_freed
@@ -710,12 +726,50 @@ class CleanerApp:
         self.scan_junk()
 
     def restart_as_admin(self):
+        """Re-launches this app with elevated privileges.
+
+        ShellExecuteW with "runas" shows a UAC prompt and returns
+        immediately — before the user has clicked Yes or No — so its
+        return value only tells us whether the launch *request* was
+        accepted by the OS (> 32 means ok), not whether the user
+        approved the UAC dialog.
+
+        Strategy:
+          1. Hide this window so it doesn't sit behind the UAC dialog.
+          2. Fire ShellExecuteW.
+          3. If the call itself failed (return <= 32), restore the window
+             and show an error — nothing was launched.
+          4. If the call succeeded, wait briefly to give the UAC dialog
+             time to appear, then destroy this window.  If the user
+             cancels UAC, the new elevated process simply never starts —
+             the user is left with nothing, which is acceptable because
+             they can reopen the app normally.  We don't try to detect
+             the UAC outcome (that would require waiting on hProcess via
+             ShellExecuteEx, adding significant complexity for marginal
+             benefit on a personal tool).
+        """
         try:
             import ctypes
             params = " ".join(f'"{a}"' for a in sys.argv)
-            ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
-            self.root.destroy()
+            self.root.withdraw()   # hide before UAC so we don't sit behind it
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", sys.executable, params, None, 1
+            )
+            if ret <= 32:
+                # Launch request rejected by the OS (not a UAC cancel —
+                # those never reach here). Restore the window and report.
+                self.root.deiconify()
+                messagebox.showerror(
+                    "Error",
+                    f"Could not request Administrator restart (code {ret}).\n"
+                    "Try right-clicking the app and choosing 'Run as administrator'."
+                )
+            else:
+                # Request accepted — UAC dialog is (or will be) showing.
+                # Give it 300 ms to appear, then close this instance.
+                self.root.after(300, lambda: (self.shutdown(), self.root.destroy()))
         except Exception as e:
+            self.root.deiconify()
             messagebox.showerror("Error", f"Could not restart as administrator: {e}")
 
     # ------------------------------------------------------------------
@@ -753,7 +807,7 @@ class CleanerApp:
         threading.Thread(target=self._check_browser_status_worker, daemon=True).start()
 
     def _check_browser_status_worker(self):
-        profiles = browser_core._browser_profiles()
+        profiles = browser_core.get_browser_profiles()
         lines = []
         running_any = False
         for label, (browser_name, path) in profiles.items():
@@ -781,7 +835,7 @@ class CleanerApp:
 
     def _clear_history_worker(self):
         log = lambda m: self._ui(self.browser_log.log, m)
-        profiles = browser_core._browser_profiles()
+        profiles = browser_core.get_browser_profiles()
         for label, (browser_name, path) in profiles.items():
             if browser_core.is_browser_running(browser_name):
                 log(f"Skipped {label} — please close it first.")
@@ -1063,6 +1117,48 @@ class CleanerApp:
         self.auto_log = LogBox(frame, height=4)
         self.auto_log.pack(fill="both", expand=False, padx=10, pady=(5, 10))
 
+        # ── Shutdown Clean ──────────────────────────────────────────────
+        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
+        ttk.Label(frame, text="Shutdown Auto-Clean", style="Section.TLabel").pack(anchor="w", padx=10)
+        ttk.Label(
+            frame,
+            text="Automatically cleans temp files, cache, and thumbnails every time you shut down the PC.",
+            style="Muted.TLabel",
+            wraplength=560,
+            justify="left",
+        ).pack(anchor="w", padx=10)
+        ttk.Label(
+            frame,
+            text="• Cleans: Temp files, Windows Temp, Chrome cache, Thumbnail cache, Error reports, Recycle Bin\n"
+                 "• Fast Startup is disabled automatically so the clean always runs\n"
+                 "• Requires Administrator rights to register",
+            style="Muted.TLabel",
+            justify="left",
+        ).pack(anchor="w", padx=20, pady=(4, 0))
+
+        sd_btn_row = ttk.Frame(frame)
+        sd_btn_row.pack(anchor="w", padx=10, pady=6)
+        ttk.Button(
+            sd_btn_row, text="Enable Shutdown Clean",
+            style="Accent.TButton", command=self.enable_shutdown_clean
+        ).pack(side="left")
+        ttk.Button(
+            sd_btn_row, text="Disable Shutdown Clean",
+            command=self.disable_shutdown_clean
+        ).pack(side="left", padx=6)
+        ttk.Button(
+            sd_btn_row, text="Run Now (Test)",
+            command=self.run_shutdown_clean_now
+        ).pack(side="left")
+
+        self.shutdown_status_label = ttk.Label(frame, text="")
+        self.shutdown_status_label.pack(anchor="w", padx=10)
+        self._refresh_shutdown_status()
+
+        self.shutdown_log = LogBox(frame, height=4)
+        self.shutdown_log.pack(fill="both", expand=False, padx=10, pady=(4, 10))
+
+        # ── History ─────────────────────────────────────────────────────
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
         ttk.Label(frame, text="Cleanup History", style="Section.TLabel").pack(anchor="w", padx=10)
         columns = ("date", "categories", "freed", "mode")
@@ -1100,10 +1196,98 @@ class CleanerApp:
         self.history_tree.delete(*self.history_tree.get_children())
         for entry in reversed(history_log.read_history()):
             ts = entry.get("timestamp", "")
-            cats = len(entry.get("categories", []))
+            # Show category names instead of just a count
+            cat_ids = entry.get("categories", [])
+            cats_display = ", ".join(cat_ids) if cat_ids else "—"
             freed = cleaner_core.format_size(entry.get("bytes_freed", 0))
             mode = entry.get("mode", "manual")
-            self.history_tree.insert("", "end", values=(ts, cats, freed, mode))
+            self.history_tree.insert("", "end", values=(ts, cats_display, freed, mode))
+
+    # ------------------------------------------------------------------
+    # Shutdown Clean
+    # ------------------------------------------------------------------
+    def _refresh_shutdown_status(self):
+        try:
+            status = shutdown_setup.get_status()
+            gpo = status.get("gpo_registered", False)
+            task = status.get("task_registered", False)
+            fast_ok = status.get("fast_startup_disabled", False)
+
+            if gpo:
+                method = "Group Policy Shutdown Script"
+            elif task:
+                method = "Task Scheduler (Event 1074)"
+            else:
+                method = None
+
+            if method:
+                fs_note = " | Fast Startup: OFF ✓" if fast_ok else " | ⚠ Fast Startup still ON"
+                self.shutdown_status_label.config(
+                    text=f"✅  Shutdown Clean ENABLED — method: {method}{fs_note}",
+                    foreground=Theme.SUCCESS,
+                )
+            else:
+                self.shutdown_status_label.config(
+                    text="⭕  Shutdown Clean is NOT set up.",
+                    foreground=Theme.TEXT_MUTED,
+                )
+        except Exception:
+            self.shutdown_status_label.config(text="Status unknown.", foreground=Theme.TEXT_MUTED)
+
+    def enable_shutdown_clean(self):
+        if not cleaner_core.is_admin():
+            if messagebox.askyesno(
+                "Admin Rights Required",
+                "Enabling Shutdown Clean requires Administrator rights.\n\n"
+                "Restart this app as Administrator now?"
+            ):
+                self.restart_as_admin()
+            return
+        threading.Thread(target=self._enable_shutdown_worker, daemon=True).start()
+
+    def _enable_shutdown_worker(self):
+        log = lambda m: self._ui(self.shutdown_log.log, m)
+        ok = shutdown_setup.setup_shutdown_clean(log)
+        if ok:
+            log("✅ Done. The cleaner will now run silently on every shutdown.")
+        else:
+            log("❌ Setup failed. Check the log above.")
+        self._ui(self._refresh_shutdown_status)
+
+    def disable_shutdown_clean(self):
+        threading.Thread(target=self._disable_shutdown_worker, daemon=True).start()
+
+    def _disable_shutdown_worker(self):
+        log = lambda m: self._ui(self.shutdown_log.log, m)
+        shutdown_setup.remove_shutdown_clean(log)
+        log("Shutdown Clean removed.")
+        self._ui(self._refresh_shutdown_status)
+
+    def run_shutdown_clean_now(self):
+        """Test run — executes the shutdown clean immediately in a background thread."""
+        log = lambda m: self._ui(self.shutdown_log.log, m)
+        log("Running shutdown clean now (test)...")
+        threading.Thread(target=self._run_shutdown_clean_worker, daemon=True).start()
+
+    def _run_shutdown_clean_worker(self):
+        log = lambda m: self._ui(self.shutdown_log.log, m)
+        try:
+            import shutdown_clean
+            import logging
+            # Use a simple lambda logger so output goes to GUI
+            class _GuiLogger:
+                def info(self, m): log(m)
+                def warning(self, m): log(f"⚠ {m}")
+                def error(self, m): log(f"❌ {m}")
+                def critical(self, m): log(f"🔴 {m}")
+                handlers = []
+            result = shutdown_clean.run_shutdown_clean(_GuiLogger())
+            history_log.log_cleanup(result)
+            freed = cleaner_core.format_size(result.get("bytes_freed", 0))
+            log(f"✅ Test run done — freed {freed}")
+            self._ui(self._refresh_history_view)
+        except Exception as exc:
+            log(f"❌ Error: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -1128,11 +1312,18 @@ def run_auto_clean():
                 cleaned_ids.append(cat["id"])
             continue
 
-        service_stopped = cat.get("stop_service") and cleaner_core.stop_windows_update_service()
+        service_state = None
+        if cat.get("stop_service"):
+            service_state = cleaner_core.stop_windows_update_service()
+            if service_state == "failed":
+                continue   # skip category — service still running
+
+        file_filter = cat.get("file_filter")
         for p in cat["paths"]:
-            summary = cleaner_core.delete_dir_contents(p)
+            summary = cleaner_core.delete_dir_contents(p, file_filter=file_filter)
             total_freed += summary["deleted_bytes"]
-        if service_stopped:
+
+        if service_state == "stopped":
             cleaner_core.start_windows_update_service()
         cleaned_ids.append(cat["id"])
 

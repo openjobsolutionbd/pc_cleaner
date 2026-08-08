@@ -68,6 +68,9 @@ def _browser_profiles():
     browser_name ("Chrome"/"Edge") is kept separate from the display
     label ("Chrome (Profile 1)") because callers need the plain browser
     name to check whether that browser's process is running.
+
+    Internal implementation — use get_browser_profiles() from outside
+    this module.
     """
     localapp = os.environ.get("LOCALAPPDATA", "")
     profiles = {}
@@ -84,6 +87,15 @@ def _browser_profiles():
             profiles[label] = (browser_name, os.path.join(user_data_dir, profile_name))
 
     return profiles
+
+
+def get_browser_profiles():
+    """Public API: returns {display_label: (browser_name, profile_dir)}
+    for every browser profile found on this machine.
+    Delegates to _browser_profiles(); callers outside this module should
+    use this function rather than the private one.
+    """
+    return _browser_profiles()
 
 
 def is_browser_running(browser_name: str) -> bool:

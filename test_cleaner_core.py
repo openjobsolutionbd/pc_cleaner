@@ -128,6 +128,43 @@ class TestDeleteDirContents(unittest.TestCase):
         # Root survives regardless
         self.assertTrue(os.path.isdir(self.tmp))
 
+    def test_file_filter_only_deletes_matching_files(self):
+        # Only files whose name starts with "thumb_" should be removed.
+        keep = self._make_file("keep_this.dat", content=b"keep")
+        delete = self._make_file("thumb_001.db", content=b"gone")
+        filt = lambda name: name.startswith("thumb_")
+        summary = core.delete_dir_contents(self.tmp, file_filter=filt)
+        self.assertFalse(os.path.exists(delete), "matching file must be deleted")
+        self.assertTrue(os.path.exists(keep), "non-matching file must survive")
+        self.assertEqual(summary["deleted_files"], 1)
+        self.assertEqual(summary["deleted_bytes"], 4)
+
+    def test_file_filter_skips_subdirectories(self):
+        # When a filter is active, subdirectories are left untouched —
+        # the filter is per-filename and directories have no single name
+        # to test against.
+        sub = os.path.join(self.tmp, "subdir")
+        os.mkdir(sub)
+        with open(os.path.join(sub, "nested.txt"), "wb") as f:
+            f.write(b"data")
+        filt = lambda name: name.endswith(".db")
+        core.delete_dir_contents(self.tmp, file_filter=filt)
+        self.assertTrue(os.path.isdir(sub), "subdirectory must survive when filter is active")
+
+    def test_symlink_file_is_never_deleted(self):
+        # Symlink files inside a temp folder must be skipped — deleting
+        # the target behind a symlink would break other applications.
+        real_file = self._make_file("real.txt", content=b"real")
+        link = os.path.join(self.tmp, "link_to_real.txt")
+        try:
+            os.symlink(real_file, link)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not supported on this platform/OS")
+        core.delete_dir_contents(self.tmp)
+        # The symlink itself should still be there (we skipped it).
+        # The real file can be gone (it wasn't a symlink itself).
+        self.assertTrue(os.path.islink(link), "symlink must not be removed")
+
     def test_windows_only_helpers_are_inert_off_windows(self):
         # On this test machine (Linux), Windows-only helpers must return
         # safe defaults instead of crashing.
@@ -144,19 +181,28 @@ class _FakeCompletedProcess:
 
 
 class TestWindowsUpdateServiceControl(unittest.TestCase):
-    """Bug fix: `net stop`/`net start` returning a nonzero exit code (the
-    command ran, but failed) must be reported as failure. Previously the
-    function returned True as long as subprocess.run() didn't raise,
-    regardless of what net.exe actually reported.
+    """stop_windows_update_service() now returns a string token instead of
+    a bool so callers can distinguish three outcomes:
+      "stopped"         — we stopped it (should restart after cleanup)
+      "already_stopped" — was already down (safe to proceed, no restart)
+      "failed"          — still running (caller must skip this category)
     """
 
-    def test_stop_returns_false_on_nonzero_returncode(self):
+    def test_stop_returns_failed_on_access_denied(self):
         fake_result = _FakeCompletedProcess(2, stderr="System error 5 has occurred. Access is denied.")
         with unittest.mock.patch("cleaner_core.is_windows", return_value=True), \
              unittest.mock.patch("cleaner_core.subprocess.run", return_value=fake_result):
-            self.assertFalse(core.stop_windows_update_service())
+            self.assertEqual(core.stop_windows_update_service(), "failed")
 
-    def test_stop_logs_the_real_reason_on_failure(self):
+    def test_stop_returns_already_stopped_when_service_not_running(self):
+        # "net stop" exits nonzero but prints "has not been started" when
+        # the service is already down — this is safe, not a real failure.
+        fake_result = _FakeCompletedProcess(2, stderr="The service has not been started.")
+        with unittest.mock.patch("cleaner_core.is_windows", return_value=True), \
+             unittest.mock.patch("cleaner_core.subprocess.run", return_value=fake_result):
+            self.assertEqual(core.stop_windows_update_service(), "already_stopped")
+
+    def test_stop_logs_reason_on_real_failure(self):
         fake_result = _FakeCompletedProcess(2, stderr="Access is denied.")
         messages = []
         with unittest.mock.patch("cleaner_core.is_windows", return_value=True), \
@@ -164,11 +210,20 @@ class TestWindowsUpdateServiceControl(unittest.TestCase):
             core.stop_windows_update_service(log=messages.append)
         self.assertTrue(any("Access is denied" in m for m in messages))
 
-    def test_stop_returns_true_on_success(self):
+    def test_stop_does_not_log_when_already_stopped(self):
+        # "already stopped" is not an error — nothing should be logged.
+        fake_result = _FakeCompletedProcess(2, stderr="The service has not been started.")
+        messages = []
+        with unittest.mock.patch("cleaner_core.is_windows", return_value=True), \
+             unittest.mock.patch("cleaner_core.subprocess.run", return_value=fake_result):
+            core.stop_windows_update_service(log=messages.append)
+        self.assertEqual(messages, [])
+
+    def test_stop_returns_stopped_on_success(self):
         fake_result = _FakeCompletedProcess(0)
         with unittest.mock.patch("cleaner_core.is_windows", return_value=True), \
              unittest.mock.patch("cleaner_core.subprocess.run", return_value=fake_result):
-            self.assertTrue(core.stop_windows_update_service())
+            self.assertEqual(core.stop_windows_update_service(), "stopped")
 
     def test_start_returns_false_on_nonzero_returncode(self):
         fake_result = _FakeCompletedProcess(2, stderr="The service has not been started.")
