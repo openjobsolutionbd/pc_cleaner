@@ -1,36 +1,35 @@
 @echo off
 :: ============================================================
-:: WaaSMedicSvc বন্ধ করার BAT ফাইল
-:: Administrator হিসেবে Run করুন (Right-click → Run as administrator)
-:: disable_windows_update.reg রান করার পরে এটা চালান
+:: Disable WaaSMedicSvc and all Windows Update scheduled tasks
+:: Run this AS ADMINISTRATOR (Right-click -> Run as administrator)
+:: Run this AFTER applying disable_windows_update.reg
 :: ============================================================
 
-echo Windows Update Medic Service (WaaSMedicSvc) বন্ধ করা হচ্ছে...
+echo Disabling Windows Update Medic Service (WaaSMedicSvc)...
 echo.
 
-:: Service বন্ধ করো
+:: Stop the service
 sc stop WaaSMedicSvc >nul 2>&1
 
-:: Registry key-এর owner নিজে নাও
+:: Take ownership of the registry key
 takeown /f "HKLM\SYSTEM\CurrentControlSet\Services\WaaSMedicSvc" >nul 2>&1
 
-:: SYSTEM account-কে permission deny করো
-:: এতে WaaSMedicSvc নিজেকে আর চালু করতে পারবে না
+:: Set Start type to Disabled (4) so it can't relaunch itself
 reg add "HKLM\SYSTEM\CurrentControlSet\Services\WaaSMedicSvc" /v "Start" /t REG_DWORD /d 4 /f >nul 2>&1
 
-:: Update Orchestrator Service বন্ধ
+:: Disable Update Orchestrator Service
 sc stop UsoSvc >nul 2>&1
 sc config UsoSvc start= disabled >nul 2>&1
 
-:: Windows Update Service বন্ধ
+:: Disable Windows Update Service
 sc stop wuauserv >nul 2>&1
 sc config wuauserv start= disabled >nul 2>&1
 
-:: Delivery Optimization বন্ধ
+:: Disable Delivery Optimization
 sc stop DoSvc >nul 2>&1
 sc config DoSvc start= disabled >nul 2>&1
 
-:: Windows Update Task Scheduler tasks বন্ধ করো
+:: Disable Windows Update scheduled tasks
 schtasks /Change /TN "\Microsoft\Windows\WindowsUpdate\Scheduled Start" /Disable >nul 2>&1
 schtasks /Change /TN "\Microsoft\Windows\WindowsUpdate\sih" /Disable >nul 2>&1
 schtasks /Change /TN "\Microsoft\Windows\WindowsUpdate\sihboot" /Disable >nul 2>&1
@@ -40,8 +39,8 @@ schtasks /Change /TN "\Microsoft\Windows\UpdateOrchestrator\Report policies" /Di
 
 echo.
 echo ============================================
-echo  সব Windows Update সার্ভিস বন্ধ করা হয়েছে।
-echo  PC Restart দিন।
+echo  All Windows Update services disabled.
+echo  Please restart your PC now.
 echo ============================================
 echo.
 pause
