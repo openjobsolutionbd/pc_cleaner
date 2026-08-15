@@ -27,7 +27,6 @@ import cleaner_core
 import browser_core
 import system_tools
 import startup_manager
-import scheduler
 import history_log
 import shutdown_setup
 import error_log
@@ -299,7 +298,6 @@ class CleanerApp:
 
         self._build_ui()
         self.refresh_startup_items()
-        self._refresh_schedule_status()
         self._refresh_history_view()
 
     def _handle_gui_exception(self, exc_type, exc_value, exc_tb):
@@ -415,24 +413,18 @@ class CleanerApp:
         self.tab_quick = ttk.Frame(notebook)
         self.tab_junk = ttk.Frame(notebook)
         self.tab_browser = ttk.Frame(notebook)
-        self.tab_tools = ttk.Frame(notebook)
         self.tab_startup = ttk.Frame(notebook)
-        self.tab_auto = ttk.Frame(notebook)
 
         notebook.add(self.tab_quick, text="Quick Clean")
         notebook.add(self.tab_junk, text="Junk Cleanup")
         notebook.add(self.tab_browser, text="Browser && Network")
-        notebook.add(self.tab_tools, text="System Tools")
         notebook.add(self.tab_startup, text="Startup Manager")
-        notebook.add(self.tab_auto, text="Automation && History")
         notebook.pack(fill="both", expand=True, padx=10, pady=(4, 10))
 
         self._build_quick_tab()
         self._build_junk_tab()
         self._build_browser_tab()
-        self._build_tools_tab()
         self._build_startup_tab()
-        self._build_auto_tab()
 
     def _refresh_header_drive_label(self):
         system_drive = os.environ.get("SystemDrive", "C:") + "\\"
@@ -491,6 +483,81 @@ class CleanerApp:
         self.quick_status_label.pack(anchor="w", pady=(4, 0))
 
         self._refresh_quick_last_cleaned()
+
+        # ── Shutdown Auto-Clean ────────────────────────────────────────
+        # Moved here from the old "Automation && History" tab, which was
+        # removed since its other contents (scheduled task via schtasks)
+        # weren't needed. This section stays because it's the actual
+        # always-on cleaning mechanism.
+        ttk.Separator(wrapper).pack(fill="x", pady=14)
+        ttk.Label(wrapper, text="Shutdown Auto-Clean", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(
+            wrapper,
+            text="Automatically cleans temp files, cache, and thumbnails every time you shut down the PC.",
+            style="Muted.TLabel",
+            wraplength=560,
+            justify="left",
+        ).pack(anchor="w")
+        ttk.Label(
+            wrapper,
+            text="• Cleans: Temp files, Windows Temp, Chrome cache, Thumbnail cache, Error reports, Recycle Bin\n"
+                 "• Fast Startup is disabled automatically so the clean always runs\n"
+                 "• Requires Administrator rights to register",
+            style="Muted.TLabel",
+            justify="left",
+        ).pack(anchor="w", padx=10, pady=(4, 0))
+
+        sd_btn_row = ttk.Frame(wrapper)
+        sd_btn_row.pack(anchor="w", pady=6)
+        ttk.Button(
+            sd_btn_row, text="Enable Shutdown Clean",
+            style="Accent.TButton", command=self.enable_shutdown_clean
+        ).pack(side="left")
+        ttk.Button(
+            sd_btn_row, text="Disable Shutdown Clean",
+            command=self.disable_shutdown_clean
+        ).pack(side="left", padx=6)
+        ttk.Button(
+            sd_btn_row, text="Run Now (Test)",
+            command=self.run_shutdown_clean_now
+        ).pack(side="left")
+
+        self.shutdown_status_label = ttk.Label(wrapper, text="")
+        self.shutdown_status_label.pack(anchor="w")
+        self._refresh_shutdown_status()
+
+        self.shutdown_log = LogBox(wrapper, height=4)
+        self.shutdown_log.pack(fill="both", expand=False, pady=(4, 10))
+
+        # ── Error Log (automatic bug-handling safety net) ─────────────────
+        ttk.Separator(wrapper).pack(fill="x", pady=10)
+        ttk.Label(wrapper, text="Error Log", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(
+            wrapper,
+            text="If something unexpected ever goes wrong, the app catches it, keeps running, "
+                 "and saves the details here instead of crashing or failing silently.",
+            style="Muted.TLabel",
+            wraplength=560,
+            justify="left",
+        ).pack(anchor="w")
+
+        err_btn_row = ttk.Frame(wrapper)
+        err_btn_row.pack(anchor="w", pady=6)
+        ttk.Button(err_btn_row, text="Error Log দেখুন", command=self.show_error_log).pack(side="left")
+        ttk.Button(err_btn_row, text="Clear Error Log", command=self.clear_error_log).pack(side="left", padx=6)
+
+        self.error_indicator = ttk.Label(wrapper, text="")
+        self.error_indicator.pack(anchor="w")
+        self._refresh_error_indicator()
+
+        # ── History ─────────────────────────────────────────────────────
+        ttk.Separator(wrapper).pack(fill="x", pady=10)
+        ttk.Label(wrapper, text="Cleanup History", style="Section.TLabel").pack(anchor="w")
+        columns = ("date", "categories", "freed", "mode")
+        self.history_tree = ttk.Treeview(wrapper, columns=columns, show="headings", height=6)
+        for col, label in zip(columns, ("Date", "Categories Cleaned", "Space Freed", "Mode")):
+            self.history_tree.heading(col, text=label)
+        self.history_tree.pack(fill="both", expand=True, pady=5)
 
     def _refresh_quick_last_cleaned(self):
         history = history_log.read_history()
@@ -917,174 +984,6 @@ class CleanerApp:
         threading.Thread(target=self._run_safely, args=(browser_core.flush_dns, log), daemon=True).start()
 
     # ------------------------------------------------------------------
-    # Tab 3: System Tools
-    # ------------------------------------------------------------------
-    def _build_tools_tab(self):
-        frame = self.tab_tools
-
-        ttk.Label(frame, text="Disk Space Analyzer", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
-        drive_row = ttk.Frame(frame)
-        drive_row.pack(fill="x", padx=10, pady=(5, 0))
-        ttk.Label(drive_row, text="Drive:").pack(side="left")
-        self.drive_var = tk.StringVar(value="")
-        self.drive_combo = ttk.Combobox(drive_row, textvariable=self.drive_var, state="readonly", width=28)
-        self.drive_combo.pack(side="left", padx=5)
-        self.drive_combo.bind("<<ComboboxSelected>>", self._on_drive_selected)
-        ttk.Button(drive_row, text="Refresh Drives", command=self.refresh_drive_list).pack(side="left")
-
-        row = ttk.Frame(frame)
-        row.pack(fill="x", padx=10, pady=5)
-        self.analyzer_path_label = ttk.Label(row, text="No folder selected", style="Muted.TLabel")
-        self.analyzer_path_label.pack(side="left")
-        ttk.Button(row, text="Choose Folder", command=self.choose_analyzer_folder).pack(side="right")
-        self.analyze_btn = ttk.Button(frame, text="Analyze", style="Accent.TButton", command=self.run_analyzer)
-        self.analyze_btn.pack(anchor="w", padx=10)
-
-        self.drive_summary_label = ttk.Label(frame, text="", style="Muted.TLabel")
-        self.drive_summary_label.pack(anchor="w", padx=10)
-
-        columns = ("name", "size", "type")
-        self.analyzer_tree = ttk.Treeview(frame, columns=columns, show="headings", height=6)
-        for col, label in zip(columns, ("Name", "Size", "Type")):
-            self.analyzer_tree.heading(col, text=label)
-        self.analyzer_tree.column("name", width=400)
-        self.analyzer_tree.pack(fill="both", expand=False, padx=10, pady=5)
-
-        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-
-        ttk.Label(frame, text="Empty Folder Finder", style="Section.TLabel").pack(anchor="w", padx=10)
-        row2 = ttk.Frame(frame)
-        row2.pack(fill="x", padx=10, pady=5)
-        self.empty_path_label = ttk.Label(row2, text="No folder selected", style="Muted.TLabel")
-        self.empty_path_label.pack(side="left")
-        ttk.Button(row2, text="Choose Folder", command=self.choose_empty_folder).pack(side="right")
-        btn_row = ttk.Frame(frame)
-        btn_row.pack(anchor="w", padx=10)
-        self.scan_empty_btn = ttk.Button(btn_row, text="Scan", command=self.scan_empty_folders)
-        self.scan_empty_btn.pack(side="left")
-        ttk.Button(btn_row, text="Delete All Found", style="Danger.TButton", command=self.delete_empty_folders_found).pack(side="left", padx=5)
-        self.empty_listbox = tk.Listbox(frame, height=5)
-        self.empty_listbox.pack(fill="both", expand=False, padx=10, pady=5)
-        self.empty_folders_found = []
-
-        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-
-        ttk.Label(frame, text="Icon Cache Reset", style="Section.TLabel").pack(anchor="w", padx=10)
-        ttk.Label(frame, text="Fixes wrong/blank icons. Restarts Explorer — your screen will flicker briefly.", style="Muted.TLabel").pack(anchor="w", padx=10)
-        ttk.Button(frame, text="Reset Icon Cache", style="Accent.TButton", command=self.reset_icon_cache).pack(anchor="w", padx=10, pady=5)
-
-        self.tools_log = LogBox(frame, height=5)
-        self.tools_log.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.refresh_drive_list()
-
-    def refresh_drive_list(self):
-        drives = system_tools.list_drives()
-        self._drives_by_label = {}
-        labels = []
-        for d in drives:
-            free_str = cleaner_core.format_size(d["free"])
-            total_str = cleaner_core.format_size(d["total"])
-            label = f"{d['path']}  ({free_str} free of {total_str})"
-            labels.append(label)
-            self._drives_by_label[label] = d
-        self.drive_combo.config(values=labels)
-        if labels and not self.drive_var.get():
-            self.drive_combo.current(0)
-
-    def _on_drive_selected(self, event=None):
-        label = self.drive_var.get()
-        drive = self._drives_by_label.get(label)
-        if drive:
-            self.analyzer_folder = drive["path"]
-            self.analyzer_path_label.config(text=drive["path"])
-
-    def choose_analyzer_folder(self):
-        path = filedialog.askdirectory()
-        if path:
-            self.analyzer_folder = path
-            self.analyzer_path_label.config(text=path)
-            self.drive_var.set("")
-
-    def run_analyzer(self):
-        if not getattr(self, "analyzer_folder", None):
-            messagebox.showinfo("No folder", "Please choose a folder first.")
-            return
-        self.analyze_btn.config(state="disabled")
-        self.tools_log.log(f"Scanning {self.analyzer_folder} — this can take a while for large folders...")
-        threading.Thread(target=self._run_safely, args=(self._run_analyzer_worker,), daemon=True).start()
-
-    def _run_analyzer_worker(self):
-        results = system_tools.analyze_folder(self.analyzer_folder)
-        self._ui(self._show_analyzer_results, results)
-
-    def _show_analyzer_results(self, results):
-        self.analyzer_tree.delete(*self.analyzer_tree.get_children())
-        usage = system_tools.get_free_space(self.analyzer_folder)
-        drive_total = usage[0] if usage else 0
-        for r in results[:200]:
-            pct = f"  ({r['size'] / drive_total * 100:.1f}%)" if drive_total else ""
-            self.analyzer_tree.insert("", "end", values=(r["name"], cleaner_core.format_size(r["size"]) + pct, "Folder" if r["is_dir"] else "File"))
-        self.tools_log.log(f"Analyzed {len(results)} item(s).")
-        if usage:
-            total, used, free = usage
-            self.drive_summary_label.config(
-                text=f"Drive: {cleaner_core.format_size(free)} free of {cleaner_core.format_size(total)} total"
-            )
-        self.analyze_btn.config(state="normal")
-
-    def choose_empty_folder(self):
-        path = filedialog.askdirectory()
-        if path:
-            self.empty_folder = path
-            self.empty_path_label.config(text=path)
-
-    def scan_empty_folders(self):
-        if not getattr(self, "empty_folder", None):
-            messagebox.showinfo("No folder", "Please choose a folder first.")
-            return
-        self.scan_empty_btn.config(state="disabled")
-        self.tools_log.log(f"Scanning {self.empty_folder} — this can take a while for large folders...")
-        threading.Thread(target=self._run_safely, args=(self._scan_empty_worker,), daemon=True).start()
-
-    def _scan_empty_worker(self):
-        found = system_tools.find_empty_folders(self.empty_folder)
-        self._ui(self._show_empty_results, found)
-
-    def _show_empty_results(self, found):
-        self.empty_folders_found = found
-        self.empty_listbox.delete(0, "end")
-        for p in found:
-            self.empty_listbox.insert("end", p)
-        self.tools_log.log(f"Found {len(found)} empty folder(s).")
-        self.scan_empty_btn.config(state="normal")
-
-    def delete_empty_folders_found(self):
-        found = self.empty_folders_found
-        if not found:
-            messagebox.showinfo("Nothing to delete", "Scan first, or no empty folders were found.")
-            return
-        if not messagebox.askyesno("Confirm", f"Delete {len(found)} empty folder(s)?"):
-            return
-        threading.Thread(target=self._run_safely, args=(self._delete_empty_worker, found,), daemon=True).start()
-
-    def _delete_empty_worker(self, found):
-        log = lambda m: self._ui(self.tools_log.log, m)
-        summary = system_tools.delete_empty_folders(found, log)
-        self._ui(self._empty_delete_done, summary)
-
-    def _empty_delete_done(self, summary):
-        self.tools_log.log(f"Deleted {summary['deleted']} folder(s).")
-        self.empty_listbox.delete(0, "end")
-        self.empty_folders_found = []
-
-    def reset_icon_cache(self):
-        if not messagebox.askyesno("Confirm", "This will restart Explorer. Continue?"):
-            return
-        log = lambda m: self._ui(self.tools_log.log, m)
-        threading.Thread(target=self._run_safely, args=(system_tools.reset_icon_cache, log), daemon=True).start()
-
-    # ------------------------------------------------------------------
     # Tab 4: Startup Manager
     # ------------------------------------------------------------------
     def _build_startup_tab(self):
@@ -1156,130 +1055,13 @@ class CleanerApp:
         self._ui(self.refresh_startup_items)
 
     # ------------------------------------------------------------------
-    # Tab 5: Automation & History
+    # Shutdown Clean, Error Log, and History live in the Quick Clean tab
+    # now (see _build_quick_tab). The old "Automation && History" tab and
+    # its schtasks-based "Scheduled Auto-Clean" scheduler were removed —
+    # Shutdown Auto-Clean fully replaces it with a more reliable
+    # mechanism, so keeping the older schtasks path around was just
+    # extra, unused code that could go stale.
     # ------------------------------------------------------------------
-    def _build_auto_tab(self):
-        frame = self.tab_auto
-        ttk.Label(frame, text="Scheduled Auto-Clean", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
-        ttk.Label(frame, text="Runs the same Junk Cleanup categories automatically in the background.", style="Muted.TLabel").pack(anchor="w", padx=10)
-
-        row = ttk.Frame(frame)
-        row.pack(anchor="w", padx=10, pady=5)
-        ttk.Label(row, text="Frequency:").pack(side="left")
-        self.freq_var = tk.StringVar(value="WEEKLY")
-        ttk.Combobox(row, textvariable=self.freq_var, values=["DAILY", "WEEKLY"], width=10, state="readonly").pack(side="left", padx=5)
-        ttk.Label(row, text="Day:").pack(side="left", padx=(10, 0))
-        self.day_var = tk.StringVar(value="SUN")
-        ttk.Combobox(row, textvariable=self.day_var, values=["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"], width=6, state="readonly").pack(side="left", padx=5)
-        ttk.Label(row, text="Time (HH:MM):").pack(side="left", padx=(10, 0))
-        self.time_var = tk.StringVar(value="03:00")
-        ttk.Entry(row, textvariable=self.time_var, width=8).pack(side="left", padx=5)
-
-        btn_row = ttk.Frame(frame)
-        btn_row.pack(anchor="w", padx=10, pady=5)
-        ttk.Button(btn_row, text="Enable Schedule", style="Accent.TButton", command=self.enable_schedule).pack(side="left")
-        ttk.Button(btn_row, text="Remove Schedule", command=self.remove_schedule).pack(side="left", padx=5)
-        self.schedule_status_label = ttk.Label(frame, text="")
-        self.schedule_status_label.pack(anchor="w", padx=10)
-
-        self.auto_log = LogBox(frame, height=4)
-        self.auto_log.pack(fill="both", expand=False, padx=10, pady=(5, 10))
-
-        # ── Shutdown Clean ──────────────────────────────────────────────
-        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-        ttk.Label(frame, text="Shutdown Auto-Clean", style="Section.TLabel").pack(anchor="w", padx=10)
-        ttk.Label(
-            frame,
-            text="Automatically cleans temp files, cache, and thumbnails every time you shut down the PC.",
-            style="Muted.TLabel",
-            wraplength=560,
-            justify="left",
-        ).pack(anchor="w", padx=10)
-        ttk.Label(
-            frame,
-            text="• Cleans: Temp files, Windows Temp, Chrome cache, Thumbnail cache, Error reports, Recycle Bin\n"
-                 "• Fast Startup is disabled automatically so the clean always runs\n"
-                 "• Requires Administrator rights to register",
-            style="Muted.TLabel",
-            justify="left",
-        ).pack(anchor="w", padx=20, pady=(4, 0))
-
-        sd_btn_row = ttk.Frame(frame)
-        sd_btn_row.pack(anchor="w", padx=10, pady=6)
-        ttk.Button(
-            sd_btn_row, text="Enable Shutdown Clean",
-            style="Accent.TButton", command=self.enable_shutdown_clean
-        ).pack(side="left")
-        ttk.Button(
-            sd_btn_row, text="Disable Shutdown Clean",
-            command=self.disable_shutdown_clean
-        ).pack(side="left", padx=6)
-        ttk.Button(
-            sd_btn_row, text="Run Now (Test)",
-            command=self.run_shutdown_clean_now
-        ).pack(side="left")
-
-        self.shutdown_status_label = ttk.Label(frame, text="")
-        self.shutdown_status_label.pack(anchor="w", padx=10)
-        self._refresh_shutdown_status()
-
-        self.shutdown_log = LogBox(frame, height=4)
-        self.shutdown_log.pack(fill="both", expand=False, padx=10, pady=(4, 10))
-
-        # ── Error Log (automatic bug-handling safety net) ─────────────────
-        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-        ttk.Label(frame, text="Error Log", style="Section.TLabel").pack(anchor="w", padx=10)
-        ttk.Label(
-            frame,
-            text="If something unexpected ever goes wrong, the app catches it, keeps running, "
-                 "and saves the details here instead of crashing or failing silently.",
-            style="Muted.TLabel",
-            wraplength=560,
-            justify="left",
-        ).pack(anchor="w", padx=10)
-
-        err_btn_row = ttk.Frame(frame)
-        err_btn_row.pack(anchor="w", padx=10, pady=6)
-        ttk.Button(err_btn_row, text="Error Log দেখুন", command=self.show_error_log).pack(side="left")
-        ttk.Button(err_btn_row, text="Clear Error Log", command=self.clear_error_log).pack(side="left", padx=6)
-
-        self.error_indicator = ttk.Label(frame, text="")
-        self.error_indicator.pack(anchor="w", padx=10)
-        self._refresh_error_indicator()
-
-        # ── History ─────────────────────────────────────────────────────
-        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-        ttk.Label(frame, text="Cleanup History", style="Section.TLabel").pack(anchor="w", padx=10)
-        columns = ("date", "categories", "freed", "mode")
-        self.history_tree = ttk.Treeview(frame, columns=columns, show="headings", height=10)
-        for col, label in zip(columns, ("Date", "Categories Cleaned", "Space Freed", "Mode")):
-            self.history_tree.heading(col, text=label)
-        self.history_tree.pack(fill="both", expand=True, padx=10, pady=5)
-
-    def _refresh_schedule_status(self):
-        scheduled = scheduler.is_task_scheduled()
-        self.schedule_status_label.config(text=("Auto-clean is currently ENABLED." if scheduled else "Auto-clean is currently OFF."))
-
-    def enable_schedule(self):
-        threading.Thread(target=self._run_safely, args=(self._enable_schedule_worker,), daemon=True).start()
-
-    def _enable_schedule_worker(self):
-        log = lambda m: self._ui(self.auto_log.log, m)
-        run_command = scheduler.build_run_command()
-        scheduler.create_scheduled_task(
-            run_command, self.freq_var.get(), self.day_var.get(), self.time_var.get(), log
-        )
-        self._ui(self._refresh_schedule_status)
-
-    def remove_schedule(self):
-        threading.Thread(target=self._run_safely, args=(self._remove_schedule_worker,), daemon=True).start()
-
-    def _remove_schedule_worker(self):
-        log = lambda m: self._ui(self.auto_log.log, m)
-        ok = scheduler.remove_scheduled_task(log)
-        if ok:
-            log("Schedule removed.")
-        self._ui(self._refresh_schedule_status)
 
     def _refresh_history_view(self):
         self.history_tree.delete(*self.history_tree.get_children())

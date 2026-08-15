@@ -14,7 +14,6 @@ Run with: python -m unittest test_integration_gui.py -v
 import os
 import shutil
 import tempfile
-import time
 import unittest
 import unittest.mock
 
@@ -22,7 +21,6 @@ import tkinter as tk
 
 import pc_cleaner as wc
 import history_log
-import scheduler
 
 
 class TestCleanJunkWorkerIntegration(unittest.TestCase):
@@ -209,113 +207,6 @@ class TestQuickCleanWorkerIntegration(unittest.TestCase):
             self.app._quick_clean_worker()
             self._pump()
         self.assertEqual(str(self.app.quick_clean_btn["state"]), "normal")
-
-
-class TestAutomationTabIntegration(unittest.TestCase):
-    """Bug fix: the "Enable Schedule" button used to run schtasks
-    directly on the main thread (freezing the GUI while it ran) and the
-    Automation tab had no log box, so the real schtasks error message
-    was never shown to the user.
-    """
-
-    def setUp(self):
-        try:
-            self.root = tk.Tk()
-        except tk.TclError as e:
-            self.skipTest(f"No display available to run the GUI: {e}")
-        self.app = wc.CleanerApp(self.root)
-
-    def tearDown(self):
-        self.app.shutdown()
-        self.root.destroy()
-
-    def _pump(self, ms=800):
-        self.root.after(ms, self.root.quit)
-        self.root.mainloop()
-
-    def test_enable_schedule_button_handler_does_not_block(self):
-        """The button click handler itself must return almost
-        immediately — the slow part (schtasks) has to happen on a
-        background thread, not in the button callback."""
-        def slow_create(*args, **kwargs):
-            time.sleep(0.4)
-            return True
-
-        with unittest.mock.patch.object(scheduler, "create_scheduled_task", side_effect=slow_create):
-            started = time.monotonic()
-            self.app.enable_schedule()  # the real button command
-            elapsed = time.monotonic() - started
-        self.assertLess(elapsed, 0.2, "enable_schedule() blocked the caller instead of using a background thread")
-        self._pump()  # let the background thread finish before teardown
-
-    def test_enable_schedule_failure_shows_the_real_schtasks_message(self):
-        """Previously only a generic 'Try Administrator' messagebox was
-        shown, regardless of what schtasks actually reported."""
-        def fake_create(run_command, frequency, day, time_str, log=None):
-            if log:
-                log("Could not create schedule: ERROR: Invalid Start Time value.")
-            return False
-
-        with unittest.mock.patch.object(scheduler, "create_scheduled_task", side_effect=fake_create):
-            self.app.enable_schedule()
-            self._pump()
-
-        logged_text = self.app.auto_log.text.get("1.0", "end")
-        self.assertIn("Invalid Start Time", logged_text)
-
-    def test_enable_schedule_success_is_logged(self):
-        with unittest.mock.patch.object(scheduler, "create_scheduled_task", return_value=True) as mock_create:
-            # Reproduce what the real function logs on success, since the
-            # mock replaces it entirely.
-            def fake_create(run_command, frequency, day, time_str, log=None):
-                if log:
-                    log(f"Scheduled: runs {frequency.lower()} at {time_str}.")
-                return True
-            mock_create.side_effect = fake_create
-
-            self.app.enable_schedule()
-            self._pump()
-
-        logged_text = self.app.auto_log.text.get("1.0", "end")
-        self.assertIn("Scheduled:", logged_text)
-
-
-class TestScanButtonsDisableDuringWork(unittest.TestCase):
-    """Bug fix: Analyze / Scan (Empty Folder Finder) had no "in
-    progress" indicator and could be clicked repeatedly to start
-    overlapping scans on a large folder.
-    """
-
-    def setUp(self):
-        try:
-            self.root = tk.Tk()
-        except tk.TclError as e:
-            self.skipTest(f"No display available to run the GUI: {e}")
-        self.app = wc.CleanerApp(self.root)
-        self.tmp_dir = tempfile.mkdtemp()
-
-    def tearDown(self):
-        self.app.shutdown()
-        self.root.destroy()
-        shutil.rmtree(self.tmp_dir, ignore_errors=True)
-
-    def _pump(self, ms=800):
-        self.root.after(ms, self.root.quit)
-        self.root.mainloop()
-
-    def test_analyze_button_disabled_while_scanning_then_re_enabled(self):
-        self.app.analyzer_folder = self.tmp_dir
-        self.app.run_analyzer()
-        self.assertEqual(str(self.app.analyze_btn["state"]), "disabled")
-        self._pump()
-        self.assertEqual(str(self.app.analyze_btn["state"]), "normal")
-
-    def test_scan_empty_button_disabled_while_scanning_then_re_enabled(self):
-        self.app.empty_folder = self.tmp_dir
-        self.app.scan_empty_folders()
-        self.assertEqual(str(self.app.scan_empty_btn["state"]), "disabled")
-        self._pump()
-        self.assertEqual(str(self.app.scan_empty_btn["state"]), "normal")
 
 
 class TestBuildFullCategories(unittest.TestCase):
