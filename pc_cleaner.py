@@ -18,6 +18,7 @@ import os
 import sys
 import threading
 import queue
+import traceback
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
@@ -29,6 +30,7 @@ import startup_manager
 import scheduler
 import history_log
 import shutdown_setup
+import error_log
 
 
 __version__ = "1.2.0"
@@ -271,6 +273,16 @@ class CleanerApp:
         root.minsize(760, 580)
         apply_theme(root)
 
+        # --- Safety net: part 1 of 2 ------------------------------------
+        # Tkinter calls this automatically whenever an exception escapes
+        # a widget callback (button click, timer, etc.) instead of that
+        # exception propagating up and killing the whole app. Every
+        # button in this app is protected by this from the moment the
+        # window exists — see _handle_gui_exception below. (Part 2 is
+        # _run_safely(), used for background-thread workers, since
+        # exceptions in a thread never reach report_callback_exception.)
+        self.root.report_callback_exception = self._handle_gui_exception
+
         self.categories = build_full_categories()
         self.category_vars = {}
         self.category_size_labels = {}
@@ -289,6 +301,62 @@ class CleanerApp:
         self.refresh_startup_items()
         self._refresh_schedule_status()
         self._refresh_history_view()
+
+    def _handle_gui_exception(self, exc_type, exc_value, exc_tb):
+        """Installed as Tkinter's report_callback_exception hook (see
+        __init__). Tkinter calls this automatically whenever an
+        exception escapes a widget callback instead of letting it
+        crash the whole app. We log full details to error_log.py and
+        show a small, calm notice — the window stays open and
+        everything else keeps working.
+
+        This is deliberately the ONLY place a bug in a button click can
+        end up: no exception from a callback can skip this handler, so
+        "the app just disappeared" should no longer happen from here.
+        """
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        try:
+            error_log.record("gui_callback", exc_value, tb_str)
+        except Exception:
+            pass
+        try:
+            self._refresh_error_indicator()
+        except Exception:
+            pass
+        messagebox.showwarning(
+            "ছোট একটা সমস্যা হয়েছে",
+            "একটা অপ্রত্যাশিত সমস্যা হয়েছিল, কিন্তু অ্যাপ চলছে এবং কোনো ফাইল মোছা হয়নি।\n\n"
+            "বিস্তারিত Automation ট্যাবের 'Error Log দেখুন' বাটনে সংরক্ষিত আছে — "
+            "সেটা Claude-কে দেখালে দ্রুত ফিক্স করা যাবে।"
+        )
+
+    def _run_safely(self, fn, *args, **kwargs):
+        """Safety net part 2 of 2 — wraps every background-thread worker
+        (see threading.Thread(target=self._run_safely, args=(self.X_worker, ...))
+        calls throughout this file). report_callback_exception (above)
+        only catches exceptions in the main GUI thread; a bug inside a
+        worker thread would otherwise just kill that thread silently —
+        no crash, no message, the button simply never finishes and
+        nothing tells you why. This makes that impossible: any
+        exception is caught, logged to error_log.py with the worker's
+        name attached, and reported through the same UI queue every
+        worker already uses to talk to the main thread.
+        """
+        try:
+            fn(*args, **kwargs)
+        except Exception as exc:
+            worker_name = getattr(fn, "__name__", str(fn))
+            try:
+                error_log.record(worker_name, exc)
+            except Exception:
+                pass
+            self._ui(self._refresh_error_indicator)
+            self._ui(lambda: messagebox.showwarning(
+                "ছোট একটা সমস্যা হয়েছে",
+                "একটা কাজ চলার সময় অপ্রত্যাশিত সমস্যা হয়েছিল এবং সেটা থেমে গেছে, "
+                "কিন্তু বাকি অ্যাপ ঠিকঠাক চলছে।\n\n"
+                "বিস্তারিত Automation ট্যাবের 'Error Log দেখুন' বাটনে সংরক্ষিত আছে।"
+            ))
 
     def _ui(self, func, *args):
         """Call from any thread to safely run func(*args) on the main thread."""
@@ -443,7 +511,7 @@ class CleanerApp:
             return
         self.quick_clean_btn.config(state="disabled")
         self.quick_status_label.config(text="Cleaning…", fg=Theme.TEXT_MUTED)
-        threading.Thread(target=self._quick_clean_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._quick_clean_worker,), daemon=True).start()
 
     def _quick_clean_worker(self):
         # Only the everyday-safe categories — same list the Junk Cleanup
@@ -602,7 +670,7 @@ class CleanerApp:
 
     def scan_junk(self):
         self.scan_btn.config(state="disabled")
-        threading.Thread(target=self._scan_junk_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._scan_junk_worker,), daemon=True).start()
 
     def _scan_junk_worker(self):
         total = 0
@@ -640,7 +708,7 @@ class CleanerApp:
         system_drive = os.environ.get("SystemDrive", "C:") + "\\"
         usage_before = system_tools.get_free_space(system_drive)
         self._free_before = usage_before[2] if usage_before else None
-        threading.Thread(target=self._clean_junk_worker, args=(selected,), daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._clean_junk_worker, selected,), daemon=True).start()
 
     def _clean_junk_worker(self, selected):
         total_freed = 0
@@ -804,7 +872,7 @@ class CleanerApp:
         self.browser_log.pack(fill="both", expand=True, padx=10, pady=10)
 
     def check_browser_status(self):
-        threading.Thread(target=self._check_browser_status_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._check_browser_status_worker,), daemon=True).start()
 
     def _check_browser_status_worker(self):
         profiles = browser_core.get_browser_profiles()
@@ -831,7 +899,7 @@ class CleanerApp:
             "Clear browsing history for all detected browsers?\n\nThis will NOT log you out of any site.",
         ):
             return
-        threading.Thread(target=self._clear_history_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._clear_history_worker,), daemon=True).start()
 
     def _clear_history_worker(self):
         log = lambda m: self._ui(self.browser_log.log, m)
@@ -846,7 +914,7 @@ class CleanerApp:
 
     def flush_dns(self):
         log = lambda m: self._ui(self.browser_log.log, m)
-        threading.Thread(target=lambda: browser_core.flush_dns(log), daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(browser_core.flush_dns, log), daemon=True).start()
 
     # ------------------------------------------------------------------
     # Tab 3: System Tools
@@ -944,7 +1012,7 @@ class CleanerApp:
             return
         self.analyze_btn.config(state="disabled")
         self.tools_log.log(f"Scanning {self.analyzer_folder} — this can take a while for large folders...")
-        threading.Thread(target=self._run_analyzer_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._run_analyzer_worker,), daemon=True).start()
 
     def _run_analyzer_worker(self):
         results = system_tools.analyze_folder(self.analyzer_folder)
@@ -977,7 +1045,7 @@ class CleanerApp:
             return
         self.scan_empty_btn.config(state="disabled")
         self.tools_log.log(f"Scanning {self.empty_folder} — this can take a while for large folders...")
-        threading.Thread(target=self._scan_empty_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._scan_empty_worker,), daemon=True).start()
 
     def _scan_empty_worker(self):
         found = system_tools.find_empty_folders(self.empty_folder)
@@ -998,7 +1066,7 @@ class CleanerApp:
             return
         if not messagebox.askyesno("Confirm", f"Delete {len(found)} empty folder(s)?"):
             return
-        threading.Thread(target=self._delete_empty_worker, args=(found,), daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._delete_empty_worker, found,), daemon=True).start()
 
     def _delete_empty_worker(self, found):
         log = lambda m: self._ui(self.tools_log.log, m)
@@ -1014,7 +1082,7 @@ class CleanerApp:
         if not messagebox.askyesno("Confirm", "This will restart Explorer. Continue?"):
             return
         log = lambda m: self._ui(self.tools_log.log, m)
-        threading.Thread(target=lambda: system_tools.reset_icon_cache(log), daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(system_tools.reset_icon_cache, log), daemon=True).start()
 
     # ------------------------------------------------------------------
     # Tab 4: Startup Manager
@@ -1041,7 +1109,7 @@ class CleanerApp:
         self.startup_items = []
 
     def refresh_startup_items(self):
-        threading.Thread(target=self._refresh_startup_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._refresh_startup_worker,), daemon=True).start()
 
     def _refresh_startup_worker(self):
         items = startup_manager.list_startup_items()
@@ -1064,7 +1132,7 @@ class CleanerApp:
         if not items:
             messagebox.showinfo("Nothing selected", "Select one or more enabled items first.")
             return
-        threading.Thread(target=self._disable_startup_worker, args=(items,), daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._disable_startup_worker, items,), daemon=True).start()
 
     def _disable_startup_worker(self, items):
         log = lambda m: self._ui(self.startup_log.log, m)
@@ -1078,7 +1146,7 @@ class CleanerApp:
         if not items:
             messagebox.showinfo("Nothing selected", "Select one or more disabled items first.")
             return
-        threading.Thread(target=self._enable_startup_worker, args=(items,), daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._enable_startup_worker, items,), daemon=True).start()
 
     def _enable_startup_worker(self, items):
         log = lambda m: self._ui(self.startup_log.log, m)
@@ -1158,6 +1226,27 @@ class CleanerApp:
         self.shutdown_log = LogBox(frame, height=4)
         self.shutdown_log.pack(fill="both", expand=False, padx=10, pady=(4, 10))
 
+        # ── Error Log (automatic bug-handling safety net) ─────────────────
+        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
+        ttk.Label(frame, text="Error Log", style="Section.TLabel").pack(anchor="w", padx=10)
+        ttk.Label(
+            frame,
+            text="If something unexpected ever goes wrong, the app catches it, keeps running, "
+                 "and saves the details here instead of crashing or failing silently.",
+            style="Muted.TLabel",
+            wraplength=560,
+            justify="left",
+        ).pack(anchor="w", padx=10)
+
+        err_btn_row = ttk.Frame(frame)
+        err_btn_row.pack(anchor="w", padx=10, pady=6)
+        ttk.Button(err_btn_row, text="Error Log দেখুন", command=self.show_error_log).pack(side="left")
+        ttk.Button(err_btn_row, text="Clear Error Log", command=self.clear_error_log).pack(side="left", padx=6)
+
+        self.error_indicator = ttk.Label(frame, text="")
+        self.error_indicator.pack(anchor="w", padx=10)
+        self._refresh_error_indicator()
+
         # ── History ─────────────────────────────────────────────────────
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
         ttk.Label(frame, text="Cleanup History", style="Section.TLabel").pack(anchor="w", padx=10)
@@ -1172,7 +1261,7 @@ class CleanerApp:
         self.schedule_status_label.config(text=("Auto-clean is currently ENABLED." if scheduled else "Auto-clean is currently OFF."))
 
     def enable_schedule(self):
-        threading.Thread(target=self._enable_schedule_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._enable_schedule_worker,), daemon=True).start()
 
     def _enable_schedule_worker(self):
         log = lambda m: self._ui(self.auto_log.log, m)
@@ -1183,7 +1272,7 @@ class CleanerApp:
         self._ui(self._refresh_schedule_status)
 
     def remove_schedule(self):
-        threading.Thread(target=self._remove_schedule_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._remove_schedule_worker,), daemon=True).start()
 
     def _remove_schedule_worker(self):
         log = lambda m: self._ui(self.auto_log.log, m)
@@ -1243,7 +1332,7 @@ class CleanerApp:
             ):
                 self.restart_as_admin()
             return
-        threading.Thread(target=self._enable_shutdown_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._enable_shutdown_worker,), daemon=True).start()
 
     def _enable_shutdown_worker(self):
         log = lambda m: self._ui(self.shutdown_log.log, m)
@@ -1255,7 +1344,7 @@ class CleanerApp:
         self._ui(self._refresh_shutdown_status)
 
     def disable_shutdown_clean(self):
-        threading.Thread(target=self._disable_shutdown_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._disable_shutdown_worker,), daemon=True).start()
 
     def _disable_shutdown_worker(self):
         log = lambda m: self._ui(self.shutdown_log.log, m)
@@ -1267,7 +1356,7 @@ class CleanerApp:
         """Test run — executes the shutdown clean immediately in a background thread."""
         log = lambda m: self._ui(self.shutdown_log.log, m)
         log("Running shutdown clean now (test)...")
-        threading.Thread(target=self._run_shutdown_clean_worker, daemon=True).start()
+        threading.Thread(target=self._run_safely, args=(self._run_shutdown_clean_worker,), daemon=True).start()
 
     def _run_shutdown_clean_worker(self):
         log = lambda m: self._ui(self.shutdown_log.log, m)
@@ -1288,6 +1377,49 @@ class CleanerApp:
             self._ui(self._refresh_history_view)
         except Exception as exc:
             log(f"❌ Error: {exc}")
+            error_log.record("run_shutdown_clean_now", exc)
+            self._ui(self._refresh_error_indicator)
+
+    # ------------------------------------------------------------------
+    # Error Log (automatic bug-handling safety net)
+    # ------------------------------------------------------------------
+    def _refresh_error_indicator(self):
+        n = error_log.count_errors()
+        if n:
+            self.error_indicator.config(
+                text=f"⚠ {n} টা টেকনিক্যাল সমস্যা লগ হয়েছে (কাজে বাধা দেয়নি)",
+                foreground=Theme.WARNING,
+            )
+        else:
+            self.error_indicator.config(text="✅ কোনো এরর লগ হয়নি", foreground=Theme.SUCCESS)
+
+    def show_error_log(self):
+        errors = error_log.read_errors()
+        win = tk.Toplevel(self.root)
+        win.title("Error Log")
+        win.geometry("760x520")
+        apply_theme(win)
+
+        if not errors:
+            ttk.Label(win, text="কোনো এরর লগ নেই — সবকিছু ঠিকঠাক চলছে।", padding=20).pack()
+            return
+
+        text = tk.Text(win, wrap="word", font=Theme.FONT_MONO, bg=Theme.SURFACE, fg=Theme.TEXT)
+        text.pack(fill="both", expand=True, padx=10, pady=10)
+        for e in reversed(errors[-50:]):
+            text.insert(
+                "end",
+                f"[{e.get('timestamp', '?')}] {e.get('context', '?')} — "
+                f"{e.get('error_type', '?')}: {e.get('message', '')}\n"
+            )
+            text.insert("end", f"{e.get('traceback', '')}\n{'-' * 70}\n")
+        text.config(state="disabled")
+
+    def clear_error_log(self):
+        if not messagebox.askyesno("Confirm", "Clear the entire error log?"):
+            return
+        error_log.clear_errors()
+        self._refresh_error_indicator()
 
 
 # ---------------------------------------------------------------------------
@@ -1295,44 +1427,68 @@ class CleanerApp:
 # ---------------------------------------------------------------------------
 
 def run_auto_clean():
-    categories = build_full_categories()
-    total_freed = 0
-    cleaned_ids = []
+    """Legacy CLI entry point (python pc_cleaner.py --auto-clean).
+    The newer shutdown_clean.py (registered via the Automation tab's
+    "Shutdown Clean" button) is now the primary automatic-cleaning
+    path, but this is kept for anyone who scheduled this flag directly.
 
-    for cat in categories:
-        if not cat.get("default_checked", True):
-            continue
-        if cat.get("needs_admin") and not cleaner_core.is_admin():
-            continue
+    Hardened the same way as shutdown_clean.py: one category's failure
+    can't take down the rest of the run, and nothing here fails
+    silently — this runs with no console attached (pythonw / Task
+    Scheduler), so without logging to error_log, a bug here would be
+    completely invisible with no trace anywhere.
+    """
+    try:
+        categories = build_full_categories()
+        total_freed = 0
+        cleaned_ids = []
 
-        if cat.get("special") == "recycle_bin":
-            freed = cleaner_core.get_recycle_bin_size()
-            if cleaner_core.empty_recycle_bin():
-                total_freed += freed
+        for cat in categories:
+            try:
+                if not cat.get("default_checked", True):
+                    continue
+                if cat.get("needs_admin") and not cleaner_core.is_admin():
+                    continue
+
+                if cat.get("special") == "recycle_bin":
+                    freed = cleaner_core.get_recycle_bin_size()
+                    if cleaner_core.empty_recycle_bin():
+                        total_freed += freed
+                        cleaned_ids.append(cat["id"])
+                    continue
+
+                service_state = None
+                if cat.get("stop_service"):
+                    service_state = cleaner_core.stop_windows_update_service()
+                    if service_state == "failed":
+                        continue   # skip category — service still running
+
+                file_filter = cat.get("file_filter")
+                for p in cat["paths"]:
+                    summary = cleaner_core.delete_dir_contents(p, file_filter=file_filter)
+                    total_freed += summary["deleted_bytes"]
+
+                if service_state == "stopped":
+                    cleaner_core.start_windows_update_service()
                 cleaned_ids.append(cat["id"])
-            continue
+            except Exception as exc:
+                try:
+                    error_log.record(f"run_auto_clean:{cat.get('id', '?')}", exc)
+                except Exception:
+                    pass
+                continue   # one category's bug must not stop the rest
 
-        service_state = None
-        if cat.get("stop_service"):
-            service_state = cleaner_core.stop_windows_update_service()
-            if service_state == "failed":
-                continue   # skip category — service still running
-
-        file_filter = cat.get("file_filter")
-        for p in cat["paths"]:
-            summary = cleaner_core.delete_dir_contents(p, file_filter=file_filter)
-            total_freed += summary["deleted_bytes"]
-
-        if service_state == "stopped":
-            cleaner_core.start_windows_update_service()
-        cleaned_ids.append(cat["id"])
-
-    history_log.log_cleanup({
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "categories": cleaned_ids,
-        "bytes_freed": total_freed,
-        "mode": "auto",
-    })
+        history_log.log_cleanup({
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "categories": cleaned_ids,
+            "bytes_freed": total_freed,
+            "mode": "auto",
+        })
+    except Exception as exc:
+        try:
+            error_log.record("run_auto_clean", exc)
+        except Exception:
+            pass
 
 
 def main():
@@ -1340,7 +1496,29 @@ def main():
         run_auto_clean()
         return
     root = tk.Tk()
-    app = CleanerApp(root)
+    try:
+        app = CleanerApp(root)
+    except Exception as exc:
+        # This happens before CleanerApp has installed its own safety
+        # net (report_callback_exception is set inside __init__), so it
+        # needs its own catch — otherwise a startup bug means the app
+        # silently never opens, which is the worst failure mode for
+        # someone who isn't a coder: no window, no message, no clue.
+        try:
+            error_log.record("startup", exc)
+        except Exception:
+            pass
+        try:
+            messagebox.showerror(
+                "চালু করা যায়নি",
+                f"PC Cleaner চালু করতে সমস্যা হয়েছে।\n\n{type(exc).__name__}: {exc}\n\n"
+                "বিস্তারিত error_log.json ফাইলে সংরক্ষিত হয়েছে — এই ফাইলটা Claude-কে "
+                "দেখালে দ্রুত ঠিক করে দেওয়া সম্ভব।"
+            )
+        except Exception:
+            pass
+        root.destroy()
+        return
     root.protocol("WM_DELETE_WINDOW", lambda: (app.shutdown(), root.destroy()))
     root.mainloop()
 

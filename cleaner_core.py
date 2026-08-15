@@ -312,27 +312,17 @@ def build_categories():
             "default_checked": True,
             "badge": "safe",
         },
-        {
-            "id": "windows_update_cache",
-            "name": "Windows Update Old Files",
-            "desc": "Downloaded copies of already-installed updates. Current updates stay intact; files re-download if ever needed.",
-            "paths": [os.path.join(windir, "SoftwareDistribution", "Download")] if windir else [],
-            "needs_admin": True,
-            "default_checked": False,
-            "badge": "caution",
-            "stop_service": True,
-        },
-        {
-            "id": "delivery_optimization",
-            "name": "Delivery Optimization Files",
-            "desc": "Cache used for sharing updates with other devices.",
-            "paths": [
-                os.path.join(windir, "SoftwareDistribution", "DeliveryOptimization", "Cache")
-            ] if windir else [],
-            "needs_admin": True,
-            "default_checked": True,
-            "badge": "safe",
-        },
+        # NOTE: "Windows Update Old Files" and "Delivery Optimization Files"
+        # categories were removed here. This machine has Windows Update
+        # permanently disabled at the OS level (see disable_windows_update.reg
+        # / .bat), so wuauserv is set to Disabled — meaning every single
+        # cleaning run would call stop_windows_update_service(), always get
+        # "failed" back (a disabled service can't be stopped), and log a
+        # confusing "Could not stop Windows Update service" message despite
+        # nothing being wrong. Removing the category entirely avoids both
+        # the pointless service-control code path and that misleading log
+        # noise. stop_windows_update_service()/start_windows_update_service()
+        # are left in place below in case Windows Update is ever re-enabled.
         {
             "id": "crash_dumps",
             "name": "Crash Dump Files (Minidump)",

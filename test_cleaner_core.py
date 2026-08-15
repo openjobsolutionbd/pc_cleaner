@@ -260,7 +260,7 @@ class TestBuildCategories(unittest.TestCase):
         # Anything marked "caution" must start unchecked — the user opts
         # in, rather than it being cleaned automatically by default.
         cats = {c["id"]: c for c in core.build_categories()}
-        for cat_id in ("windows_update_cache", "crash_dumps", "prefetch"):
+        for cat_id in ("crash_dumps", "prefetch"):
             self.assertEqual(cats[cat_id]["badge"], "caution")
             self.assertFalse(cats[cat_id]["default_checked"])
 
@@ -270,10 +270,19 @@ class TestBuildCategories(unittest.TestCase):
         cats = {c["id"]: c for c in core.build_categories()}
         for cat_id in (
             "user_temp", "windows_temp", "chrome_cache", "edge_cache",
-            "thumbnail_cache", "wer_reports", "delivery_optimization",
+            "thumbnail_cache", "wer_reports",
         ):
             self.assertEqual(cats[cat_id]["badge"], "safe")
             self.assertTrue(cats[cat_id]["default_checked"])
+
+    def test_windows_update_categories_are_not_present(self):
+        # These were removed once Windows Update was permanently disabled
+        # at the OS level (see disable_windows_update.reg/.bat) — keeping
+        # them meant every run tried to stop an already-Disabled service
+        # and logged a confusing failure message for no benefit.
+        ids = {c["id"] for c in core.build_categories()}
+        self.assertNotIn("windows_update_cache", ids)
+        self.assertNotIn("delivery_optimization", ids)
 
 
 if __name__ == "__main__":

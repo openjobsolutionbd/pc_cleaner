@@ -1,0 +1,18 @@
+# Compiled Python files — these are regenerated automatically every
+# time the app runs and should never be committed. Their presence in
+# the repo before this .gitignore existed is what caused this project's
+# GitHub history to accumulate __pycache__ noise.
+__pycache__/
+*.pyc
+*.pyo
+
+# Local data the app creates on the user's own machine — never part of
+# the source code, and would leak personal info (file paths, cleanup
+# history, error details) if committed.
+*.log
+error_log.json
+history.json
+
+# Editor/OS clutter
+.DS_Store
+Thumbs.db

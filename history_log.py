@@ -10,17 +10,7 @@ import os
 import json
 import tempfile
 
-try:
-    import msvcrt
-    _HAS_MSVCRT = True
-except ImportError:
-    _HAS_MSVCRT = False
-
-try:
-    import fcntl
-    _HAS_FCNTL = True
-except ImportError:
-    _HAS_FCNTL = False
+from file_lock import lock_file as _lock_file, unlock_file as _unlock_file
 
 MAX_ENTRIES = 100
 
@@ -28,30 +18,6 @@ MAX_ENTRIES = 100
 def default_log_path() -> str:
     base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
     return os.path.join(base, "PCCleaner", "history.json")
-
-
-def _lock_file(f):
-    """Takes an exclusive OS-level lock on file handle `f`, blocking
-    until it's free. Every caller locks the same 1-byte region (byte 0)
-    so they correctly serialize against each other regardless of the
-    file's actual size. If neither locking primitive is available,
-    this is a no-op (best-effort — matches this project's existing
-    pattern of gracefully degrading when a platform-specific facility,
-    like winreg in startup_manager.py, isn't present).
-    """
-    f.seek(0)
-    if _HAS_MSVCRT:
-        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
-    elif _HAS_FCNTL:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-
-
-def _unlock_file(f):
-    f.seek(0)
-    if _HAS_MSVCRT:
-        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-    elif _HAS_FCNTL:
-        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 def read_history(log_file: str = None) -> list:

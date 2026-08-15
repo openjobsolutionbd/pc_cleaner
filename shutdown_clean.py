@@ -20,11 +20,13 @@ it hibernates the kernel instead.  Group Policy shutdown scripts are skipped
 in this mode.  shutdown_setup.py disables Fast Startup so that every "Shut
 Down" from the Start menu triggers a real shutdown and this script always runs.
 
-Log file
---------
-Results are appended to:
-    %LOCALAPPDATA%\\pc_cleaner\\shutdown_clean.log
-and also into the normal PC Cleaner history (shared with the GUI).
+Log files
+---------
+Text log:  %LOCALAPPDATA%\\PCCleaner\\shutdown_clean.log
+Structured errors (if any): %LOCALAPPDATA%\\PCCleaner\\error_log.json
+    (same file the GUI's "Error Log" viewer reads — see error_log.py)
+Results are also appended into the normal PC Cleaner history, shared
+with the GUI.
 
 Design principles
 -----------------
@@ -50,6 +52,7 @@ if _HERE not in sys.path:
 
 import cleaner_core
 import history_log
+import error_log
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +61,7 @@ import history_log
 def _setup_log() -> logging.Logger:
     log_dir = os.path.join(
         os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
-        "pc_cleaner",
+        "PCCleaner",
     )
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "shutdown_clean.log")
@@ -80,9 +83,10 @@ def _setup_log() -> logging.Logger:
 # stop or could affect the next boot if partially cleaned.
 #
 # Windows Update categories (windows_update_cache, delivery_optimization)
-# are intentionally EXCLUDED — the user has Windows Update permanently
-# disabled, so these folders stay empty anyway, and stopping wuauserv
-# at shutdown would be pointless overhead.
+# no longer exist in cleaner_core.build_categories() at all — Windows
+# Update is permanently disabled at the OS level on this machine (see
+# disable_windows_update.reg/.bat), so those categories were removed
+# there rather than merely excluded here.
 _SHUTDOWN_CLEAN_IDS = {
     "user_temp",
     "windows_temp",
@@ -136,6 +140,7 @@ def run_shutdown_clean(logger: logging.Logger) -> dict:
                 msg = f"{cat_name}: {exc}"
                 logger.error(msg)
                 errors.append(msg)
+                error_log.record(f"shutdown_clean:{cat['id']}", exc)
             continue
 
         # Normal path-based categories.
@@ -160,6 +165,7 @@ def run_shutdown_clean(logger: logging.Logger) -> dict:
                 msg = f"{cat_name} ({path}): {exc}"
                 logger.error(msg)
                 errors.append(msg)
+                error_log.record(f"shutdown_clean:{cat['id']}", exc)
 
         total_freed += cat_freed
         cleaned_ids.append(cat["id"])
@@ -193,6 +199,10 @@ def main():
             logger.critical(f"Unhandled exception in shutdown_clean: {exc}", exc_info=True)
         except Exception:
             pass  # Even the logger failed — nothing more we can do.
+        try:
+            error_log.record("shutdown_clean_fatal", exc)
+        except Exception:
+            pass
         sys.exit(1)
 
 
