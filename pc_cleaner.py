@@ -1057,10 +1057,10 @@ class CleanerApp:
     # ------------------------------------------------------------------
     # Shutdown Clean, Error Log, and History live in the Quick Clean tab
     # now (see _build_quick_tab). The old "Automation && History" tab and
-    # its schtasks-based "Scheduled Auto-Clean" scheduler were removed —
-    # Shutdown Auto-Clean fully replaces it with a more reliable
-    # mechanism, so keeping the older schtasks path around was just
-    # extra, unused code that could go stale.
+    # its schtasks-based "Scheduled Auto-Clean" scheduler.py were removed
+    # entirely — Shutdown Auto-Clean fully replaces the same job with a
+    # more reliable mechanism, so keeping both around would just be
+    # redundant, unused surface area.
     # ------------------------------------------------------------------
 
     def _refresh_history_view(self):
