@@ -1,0 +1,40 @@
+# Dev-tooling config only — nothing here is imported by pc_cleaner.py or
+# bundled into PCCleaner.exe, so this does not affect the zero-third-
+# party-dependency guarantee (see test_no_network_guarantee.py). Ruff
+# and mypy just help catch bugs before they ship; they run in CI
+# (.github/workflows/tests.yml) and can be run locally with lint.bat.
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# E/W  = pycodestyle (style issues that usually indicate a real mistake)
+# F    = pyflakes (unused imports, undefined names, etc. - real bugs)
+# B    = flake8-bugbear (common correctness pitfalls, e.g. mutable
+#        default arguments, loop variables captured by closures)
+# UP   = pyupgrade (outdated Python idioms)
+# SIM  = flake8-simplify (needlessly complicated code that likely hides
+#        a bug, e.g. `if x == True`)
+select = ["E", "W", "F", "B", "UP", "SIM"]
+ignore = [
+    "E501",  # line-too-long: the GUI-building code has long, dense
+             # single-statement lines by convention; not worth flagging
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files intentionally do things Ruff would otherwise flag, e.g.
+# unittest.mock.patch() targets that look like unused imports.
+"test_*.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# Deliberately lenient: this codebase predates type hints, so mypy is
+# set up to catch real mismatches in the hints that DO exist rather
+# than demand every function be annotated before it's useful at all.
+# Tighten this incrementally (e.g. disallow_untyped_defs = true) as
+# more of the codebase picks up type hints over time.
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true

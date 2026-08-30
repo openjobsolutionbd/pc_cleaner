@@ -14,6 +14,7 @@ Run with: python -m unittest test_integration_gui.py -v
 import os
 import shutil
 import tempfile
+import time
 import unittest
 import unittest.mock
 
@@ -207,6 +208,105 @@ class TestQuickCleanWorkerIntegration(unittest.TestCase):
             self.app._quick_clean_worker()
             self._pump()
         self.assertEqual(str(self.app.quick_clean_btn["state"]), "normal")
+
+
+class TestTabStructure(unittest.TestCase):
+    """After merging Chrome opener in and removing System Tools /
+    Automation & History, the app should have exactly four tabs, and
+    the Startup && Shutdown tab should carry both the startup-item
+    widgets and the Shutdown Clean widgets that used to live on two
+    separate tabs.
+    """
+
+    def setUp(self):
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as e:
+            self.skipTest(f"No display available to run the GUI: {e}")
+        self.app = wc.CleanerApp(self.root)
+
+    def tearDown(self):
+        self.app.shutdown()
+        self.root.destroy()
+
+    def test_exactly_four_tabs(self):
+        notebook = self.app.tab_quick.master
+        self.assertEqual(len(notebook.tabs()), 4)
+
+    def test_removed_tabs_are_not_attributes(self):
+        self.assertFalse(hasattr(self.app, "tab_tools"))
+        self.assertFalse(hasattr(self.app, "tab_auto"))
+
+    def test_startup_and_shutdown_widgets_share_one_tab(self):
+        # Startup Manager widgets
+        self.assertTrue(hasattr(self.app, "startup_tree"))
+        # Shutdown Clean widgets, now built as part of the same tab
+        self.assertTrue(hasattr(self.app, "shutdown_status_label"))
+        self.assertTrue(hasattr(self.app, "shutdown_log"))
+
+
+class TestShutdownCleanIntegration(unittest.TestCase):
+    """Shutdown Clean is the one piece of the old Automation & History
+    tab that was explicitly kept — make sure it still actually works
+    (runs off the main thread, logs to history, survives errors)
+    now that it lives on the Startup && Shutdown tab instead.
+    """
+
+    def setUp(self):
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as e:
+            self.skipTest(f"No display available to run the GUI: {e}")
+        self.app = wc.CleanerApp(self.root)
+        self.tmp_dir = tempfile.mkdtemp()
+        self.log_file = os.path.join(self.tmp_dir, "history.json")
+        history_log.default_log_path = lambda: self.log_file
+
+    def tearDown(self):
+        self.app.shutdown()
+        self.root.destroy()
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _pump(self, ms=800):
+        self.root.after(ms, self.root.quit)
+        self.root.mainloop()
+
+    def test_run_now_logs_to_history_and_does_not_crash(self):
+        fake_result = {
+            "timestamp": "2026-01-01T00:00:00",
+            "categories": ["temp"],
+            "bytes_freed": 123,
+            "mode": "shutdown",
+        }
+        with unittest.mock.patch("shutdown_clean.run_shutdown_clean", return_value=fake_result):
+            self.app.run_shutdown_clean_now()  # the real button command
+            self._pump()
+
+        logged_text = self.app.shutdown_log.text.get("1.0", "end")
+        self.assertIn("Test run done", logged_text)
+        history = history_log.read_history(self.log_file)
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["bytes_freed"], 123)
+
+    def test_run_now_button_handler_does_not_block(self):
+        def slow_run(logger):
+            time.sleep(0.4)
+            return {"timestamp": "2026-01-01T00:00:00", "categories": [], "bytes_freed": 0, "mode": "shutdown"}
+
+        with unittest.mock.patch("shutdown_clean.run_shutdown_clean", side_effect=slow_run):
+            started = time.monotonic()
+            self.app.run_shutdown_clean_now()
+            elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 0.2, "run_shutdown_clean_now() blocked the caller instead of using a background thread")
+        self._pump()
+
+    def test_a_failed_run_is_reported_in_the_log_not_a_crash(self):
+        with unittest.mock.patch("shutdown_clean.run_shutdown_clean", side_effect=RuntimeError("boom")):
+            self.app.run_shutdown_clean_now()
+            self._pump()
+
+        logged_text = self.app.shutdown_log.text.get("1.0", "end")
+        self.assertIn("Error", logged_text)
 
 
 class TestBuildFullCategories(unittest.TestCase):

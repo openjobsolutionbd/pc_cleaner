@@ -1,6 +1,8 @@
 import os
 import sqlite3
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -65,6 +67,52 @@ class TestClearBrowsingHistory(unittest.TestCase):
     def test_get_history_entry_count_missing_file_returns_zero(self):
         os.remove(self.history_path)
         self.assertEqual(bc.get_history_entry_count(self.profile_dir), 0)
+
+    def test_stale_wal_file_does_not_resurrect_cleared_history(self):
+        """Real bug found by inspection: if the History file was left in
+        WAL mode with an uncheckpointed -wal file next to it - completely
+        normal after an abnormal shutdown (crash, force-kill, power
+        loss) - clear_browsing_history() used to leave that ORIGINAL
+        -wal file behind untouched after writing back the cleared copy.
+        The next time anything opened the profile, SQLite would replay
+        the stale WAL's old frames on top of the freshly-cleared file -
+        bringing the "deleted" row right back.
+
+        Reproduced with a genuinely orphaned WAL file (a subprocess
+        that commits a WAL write then exits via os._exit(), skipping
+        all cleanup - so by the time clear_browsing_history() runs,
+        there is no live connection anywhere, exactly like a crashed
+        Chrome, only the leftover -wal file on disk).
+        """
+        script = (
+            "import sqlite3\n"
+            f"conn = sqlite3.connect({self.history_path!r})\n"
+            "conn.execute('PRAGMA journal_mode=WAL')\n"
+            "conn.execute(\"INSERT INTO urls (url, title) VALUES ('https://second-site.example', 'x')\")\n"
+            "conn.commit()\n"
+            "import os\n"
+            "os._exit(0)\n"
+        )
+        subprocess.run([sys.executable, "-c", script], check=True)
+        self.assertTrue(
+            os.path.exists(self.history_path + "-wal"),
+            "test setup failed to produce an orphaned -wal file",
+        )
+
+        result = bc.clear_browsing_history(self.profile_dir)
+        self.assertTrue(result)
+        self.assertFalse(
+            os.path.exists(self.history_path + "-wal"),
+            "a stale -wal file was left behind next to the cleared History file",
+        )
+
+        # The real-world check: does a completely fresh connection (this
+        # is what Chrome itself would do on next launch) see the data as
+        # cleared, or does the stale WAL bring it back?
+        fresh = sqlite3.connect(self.history_path)
+        rows = fresh.execute("SELECT url FROM urls").fetchall()
+        fresh.close()
+        self.assertEqual(rows, [], "cleared history reappeared after reopening - the stale WAL resurrected it")
 
 
 def _make_profile(user_data_dir, profile_name):

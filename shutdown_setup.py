@@ -314,7 +314,11 @@ def setup_shutdown_clean(log=None) -> bool:
       2. Try Group Policy registry (Method A — needs admin).
       3. Fall back to Task Scheduler Event 1074 (Method B).
 
-    Returns True if registration succeeded by either method.
+    Returns True if registration succeeded by either method. Note this
+    can be True even if step 1 failed — the script IS registered, but
+    won't actually run on a normal shutdown until Fast Startup is off,
+    so that's always logged clearly rather than being contradicted by
+    an unconditional "done, this will now work" message right after it.
     """
     if log is None:
         log = print
@@ -323,12 +327,19 @@ def setup_shutdown_clean(log=None) -> bool:
         log("WARNING: Running without admin rights. Some steps may fail.")
 
     # Step 1: Disable Fast Startup.
-    disable_fast_startup(log)
+    fast_startup_ok = disable_fast_startup(log)
 
     # Step 2: Try GPO first, fall back to schtasks.
-    if _register_gpo(log):
-        return True
-    return _register_task(log)
+    registered = _register_gpo(log) or _register_task(log)
+
+    if registered and not fast_startup_ok:
+        log(
+            "⚠ Registered, but Fast Startup is still ON — Windows skips "
+            "shutdown scripts in Fast Startup mode, so the clean will "
+            "NOT actually run until this is fixed (see the warning above)."
+        )
+
+    return registered
 
 
 def remove_shutdown_clean(log=None) -> bool:

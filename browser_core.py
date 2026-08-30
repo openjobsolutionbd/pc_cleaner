@@ -174,6 +174,24 @@ def clear_browsing_history(profile_dir: str, log=None) -> bool:
             conn.close()
 
         shutil.copy2(tmp_copy, history_file)
+
+        # The replacement we just wrote is guaranteed non-WAL (we forced
+        # journal_mode=DELETE above), so it's fully self-contained. Any
+        # -wal/-shm files still sitting next to the ORIGINAL history_file
+        # at this point are now stale leftovers from before the clear —
+        # and leaving them isn't just untidy: a stale -wal file replays
+        # its old frames on top of whatever main file it finds next time
+        # anything opens this database, which can literally bring back
+        # the rows we just deleted. Remove them so the clear actually
+        # sticks.
+        for suffix in ("-wal", "-shm"):
+            stale = history_file + suffix
+            if os.path.exists(stale):
+                try:
+                    os.remove(stale)
+                except OSError:
+                    pass
+
         log("Browsing history cleared.")
         return True
     except sqlite3.OperationalError as e:

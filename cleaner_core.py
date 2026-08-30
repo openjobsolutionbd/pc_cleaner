@@ -15,7 +15,10 @@ it possible to unit-test the risky parts (deletion) on any OS.
 import os
 import shutil
 import ctypes
+import ctypes.wintypes
 import subprocess
+
+import browser_core
 
 
 # ---------------------------------------------------------------------------
@@ -38,20 +41,39 @@ def get_dir_size(path: str) -> int:
     """Recursively sum the size of every file under `path`.
     Never raises: unreadable/locked files are simply skipped (counted as 0).
     Returns 0 if the path doesn't exist.
+
+    Uses os.scandir() rather than os.walk() + os.path.getsize(): os.walk()
+    already uses scandir() internally, but it throws away the per-entry
+    type/stat info it gathered and hands back plain filename strings, so
+    calling os.path.getsize()/os.path.islink() on those triggers a second,
+    redundant stat() syscall per file. Reading straight from the DirEntry
+    objects instead reuses the info from the original directory listing
+    wherever the OS provides it for free — a well-documented 2-20x win on
+    Windows especially, which matters here since browser cache folders
+    (now scanned for every profile, see _chromium_cache_paths) can easily
+    contain thousands of small files.
     """
     if not path or not os.path.isdir(path):
         return 0
 
     total = 0
-    for root, dirs, files in os.walk(path, onerror=lambda e: None):
-        for name in files:
-            fpath = os.path.join(root, name)
-            try:
-                if not os.path.islink(fpath):
-                    total += os.path.getsize(fpath)
-            except OSError:
-                # File vanished, or permission denied — skip, don't crash.
-                continue
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        total += get_dir_size(entry.path)
+                    else:
+                        total += entry.stat(follow_symlinks=False).st_size
+                except OSError:
+                    # File vanished, or permission denied — skip, don't crash.
+                    continue
+    except OSError:
+        # Directory vanished or became unreadable between the isdir()
+        # check above and opening it — treat as "nothing found here".
+        return total
     return total
 
 
@@ -88,15 +110,29 @@ def delete_dir_contents(path: str, log=None, file_filter=None) -> dict:
         log(f"Path not found, skipping: {path}")
         return summary
 
-    for entry in os.listdir(path):
-        full = os.path.join(path, entry)
+    # os.scandir() instead of os.listdir(): each DirEntry carries cached
+    # type info from the directory listing itself, so is_symlink()/
+    # is_dir() below don't need their own separate stat() syscall the way
+    # os.path.islink()/os.path.isdir() on a plain filename would (see
+    # get_dir_size() for the same reasoning, in more detail).
+    try:
+        entries = list(os.scandir(path))
+    except OSError:
+        log(f"Path not found, skipping: {path}")
+        return summary
+
+    for entry in entries:
+        full = entry.path
 
         # Never follow or delete symlinks — file or directory.
-        if os.path.islink(full):
+        try:
+            if entry.is_symlink():
+                continue
+        except OSError:
             continue
 
         try:
-            if os.path.isdir(full):
+            if entry.is_dir(follow_symlinks=False):
                 # When a filter is active we only remove individual files
                 # that match it, so skip subdirectories entirely.
                 if file_filter is not None:
@@ -107,9 +143,12 @@ def delete_dir_contents(path: str, log=None, file_filter=None) -> dict:
                 summary["deleted_dirs"] += 1
             else:
                 # Apply the per-filename filter if one was provided.
-                if file_filter is not None and not file_filter(entry):
+                if file_filter is not None and not file_filter(entry.name):
                     continue
-                size_before = os.path.getsize(full) if os.path.exists(full) else 0
+                try:
+                    size_before = entry.stat(follow_symlinks=False).st_size
+                except OSError:
+                    size_before = 0
                 os.remove(full)
                 summary["deleted_bytes"] += size_before
                 summary["deleted_files"] += 1
@@ -137,27 +176,39 @@ def is_admin() -> bool:
     if not is_windows():
         return False
     try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        is_admin_fn = ctypes.windll.shell32.IsUserAnAdmin
+        is_admin_fn.argtypes = []
+        is_admin_fn.restype = ctypes.wintypes.BOOL
+        return bool(is_admin_fn())
     except Exception:
         return False
 
 
+class _SHQUERYRBINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint32),
+        ("i64Size", ctypes.c_int64),
+        ("i64NumItems", ctypes.c_int64),
+    ]
+
+
 def get_recycle_bin_size() -> int:
-    """Uses the Windows Shell API to get the real Recycle Bin size in bytes."""
+    """Uses the Windows Shell API to get the real Recycle Bin size in bytes.
+    Returns 0 on any failure (including off Windows) rather than raising,
+    since this is only ever used to show an estimate to the user.
+    """
     if not is_windows():
         return 0
 
-    class SHQUERYRBINFO(ctypes.Structure):
-        _fields_ = [
-            ("cbSize", ctypes.c_uint32),
-            ("i64Size", ctypes.c_int64),
-            ("i64NumItems", ctypes.c_int64),
-        ]
-
-    info = SHQUERYRBINFO()
-    info.cbSize = ctypes.sizeof(SHQUERYRBINFO)
+    info = _SHQUERYRBINFO()
+    info.cbSize = ctypes.sizeof(_SHQUERYRBINFO)
     try:
-        ctypes.windll.shell32.SHQueryRecycleBinW(None, ctypes.byref(info))
+        query_fn = ctypes.windll.shell32.SHQueryRecycleBinW
+        query_fn.argtypes = [ctypes.wintypes.LPCWSTR, ctypes.POINTER(_SHQUERYRBINFO)]
+        query_fn.restype = ctypes.c_long  # HRESULT
+        result = query_fn(None, ctypes.byref(info))
+        if result != 0:  # S_OK == 0; anything else means info wasn't filled in
+            return 0
         return max(0, info.i64Size)
     except Exception:
         return 0
@@ -170,10 +221,17 @@ def empty_recycle_bin() -> bool:
     SHERB_NOPROGRESSUI = 0x00000002
     SHERB_NOSOUND = 0x00000004
     try:
-        ctypes.windll.shell32.SHEmptyRecycleBinW(
-            None, None, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND
-        )
-        return True
+        empty_fn = ctypes.windll.shell32.SHEmptyRecycleBinW
+        empty_fn.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.LPCWSTR, ctypes.wintypes.DWORD]
+        empty_fn.restype = ctypes.c_long  # HRESULT
+        empty_fn(None, None, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND)
+        # SHEmptyRecycleBinW's HRESULT is not a reliable success signal on
+        # its own: it's documented to return a non-zero/error code even
+        # when the Recycle Bin was already empty (a known, long-standing
+        # quirk of this specific API - the PowerShell Clear-RecycleBin
+        # cmdlet has the same bug reported against it). So instead of
+        # trusting the return code, check the actual outcome.
+        return get_recycle_bin_size() == 0
     except Exception:
         return False
 
@@ -239,6 +297,40 @@ def _env(name, default=""):
     return os.environ.get(name, default)
 
 
+# Every Chromium cache folder that quietly grows over time and can drag
+# a browser down — not just the main HTTP cache. Same subfolder names
+# for Chrome and Edge since both are Chromium-based.
+_CHROMIUM_CACHE_SUBFOLDERS = [
+    "Cache",
+    "Code Cache",
+    "GPUCache",
+    "DawnCache",
+    "DawnGraphiteCache",
+    os.path.join("Service Worker", "CacheStorage"),
+    os.path.join("Service Worker", "ScriptCache"),
+]
+
+
+def _chromium_cache_paths(profiles: dict, browser_name: str) -> list:
+    """Every cache subfolder, across every profile, for a Chromium-based
+    browser ("Chrome" or "Edge") — not just the Default profile's main
+    Cache folder. Paths that don't exist are simply skipped later by
+    delete_dir_contents, so it's fine to list them speculatively.
+
+    Takes an already-fetched profiles dict (from
+    browser_core.get_browser_profiles()) rather than fetching it itself,
+    so building both the Chrome and Edge cache categories together only
+    scans the profile folders on disk once, not once per browser.
+    """
+    paths = []
+    for _, (name, profile_dir) in profiles.items():
+        if name != browser_name:
+            continue
+        for sub in _CHROMIUM_CACHE_SUBFOLDERS:
+            paths.append(os.path.join(profile_dir, sub))
+    return paths
+
+
 def build_categories():
     """Returns the list of cleanable categories, with paths resolved for the
     current machine. Safe to call on any OS (paths just won't exist on
@@ -247,6 +339,11 @@ def build_categories():
     windir = _env("WINDIR", "C:\\Windows")
     localapp = _env("LOCALAPPDATA", "")
     temp = _env("TEMP", "")
+    # Fetched once and reused for both the Chrome and Edge cache
+    # categories below, instead of each one triggering its own full
+    # profile-folder scan (get_browser_profiles() always looks at both
+    # browsers regardless of which one the caller actually wants).
+    browser_profiles = browser_core.get_browser_profiles() if localapp else {}
 
     categories = [
         {
@@ -270,10 +367,8 @@ def build_categories():
         {
             "id": "chrome_cache",
             "name": "Chrome Browser Cache",
-            "desc": "Temporary copies of website files/images. Sites may load slightly slower the first time after clearing.",
-            "paths": [
-                os.path.join(localapp, "Google", "Chrome", "User Data", "Default", "Cache")
-            ] if localapp else [],
+            "desc": "Temporary copies of website files/images, across every profile. Sites may load slightly slower the first time after clearing.",
+            "paths": _chromium_cache_paths(browser_profiles, "Chrome"),
             "needs_admin": False,
             "default_checked": True,
             "badge": "safe",
@@ -281,10 +376,8 @@ def build_categories():
         {
             "id": "edge_cache",
             "name": "Edge Browser Cache",
-            "desc": "Microsoft Edge's temporary browsing files.",
-            "paths": [
-                os.path.join(localapp, "Microsoft", "Edge", "User Data", "Default", "Cache")
-            ] if localapp else [],
+            "desc": "Microsoft Edge's temporary browsing files, across every profile.",
+            "paths": _chromium_cache_paths(browser_profiles, "Edge"),
             "needs_admin": False,
             "default_checked": True,
             "badge": "safe",

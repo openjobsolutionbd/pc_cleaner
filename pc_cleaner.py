@@ -1,17 +1,17 @@
 """
 pc_cleaner.py
 -------------------
-Main GUI application. Six tabs:
+Main GUI application. Four tabs:
   0. Quick Clean         - one-button shortcut that cleans only the
                            "safe"-badge categories, for everyday use
   1. Junk Cleanup      - temp/cache/update-leftover files + Recycle Bin
-  2. Browser & Network  - browsing history (never cookies) + DNS flush
-  3. System Tools       - disk space analyzer, empty folder finder, icon cache reset
-  4. Startup Manager    - enable/disable auto-start programs (reversibly)
-  5. Automation & History - scheduled auto-clean + log of past runs
+  2. Browser & Network  - browsing history (never cookies) + DNS flush +
+                           Chrome profile manager (open many, or close all & shut down)
+  3. Startup && Shutdown - enable/disable auto-start programs (reversibly) +
+                           Shutdown Auto-Clean (cleans on every PC shutdown)
 
 Run with a GUI:      python pc_cleaner.py
-Run headless (used by the scheduled task): python pc_cleaner.py --auto-clean
+Run headless (used by a Task-Scheduler entry, if one exists): python pc_cleaner.py --auto-clean
 """
 
 import os
@@ -20,11 +20,12 @@ import threading
 import queue
 import traceback
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
 from datetime import datetime
 
 import cleaner_core
 import browser_core
+import chrome_profile_manager
 import system_tools
 import startup_manager
 import history_log
@@ -32,7 +33,7 @@ import shutdown_setup
 import error_log
 
 
-__version__ = "1.2.0"
+__version__ = "1.4.4"
 
 
 # ----------------------------------------------------------------------
@@ -298,7 +299,6 @@ class CleanerApp:
 
         self._build_ui()
         self.refresh_startup_items()
-        self._refresh_history_view()
 
     def _handle_gui_exception(self, exc_type, exc_value, exc_tb):
         """Installed as Tkinter's report_callback_exception hook (see
@@ -317,15 +317,11 @@ class CleanerApp:
             error_log.record("gui_callback", exc_value, tb_str)
         except Exception:
             pass
-        try:
-            self._refresh_error_indicator()
-        except Exception:
-            pass
         messagebox.showwarning(
             "ছোট একটা সমস্যা হয়েছে",
             "একটা অপ্রত্যাশিত সমস্যা হয়েছিল, কিন্তু অ্যাপ চলছে এবং কোনো ফাইল মোছা হয়নি।\n\n"
-            "বিস্তারিত Automation ট্যাবের 'Error Log দেখুন' বাটনে সংরক্ষিত আছে — "
-            "সেটা Claude-কে দেখালে দ্রুত ফিক্স করা যাবে।"
+            "বিস্তারিত error_log.json ফাইলে সংরক্ষিত হয়েছে — এই ফাইলটা Claude-কে "
+            "দেখালে দ্রুত ফিক্স করা যাবে।"
         )
 
     def _run_safely(self, fn, *args, **kwargs):
@@ -348,12 +344,11 @@ class CleanerApp:
                 error_log.record(worker_name, exc)
             except Exception:
                 pass
-            self._ui(self._refresh_error_indicator)
             self._ui(lambda: messagebox.showwarning(
                 "ছোট একটা সমস্যা হয়েছে",
                 "একটা কাজ চলার সময় অপ্রত্যাশিত সমস্যা হয়েছিল এবং সেটা থেমে গেছে, "
                 "কিন্তু বাকি অ্যাপ ঠিকঠাক চলছে।\n\n"
-                "বিস্তারিত Automation ট্যাবের 'Error Log দেখুন' বাটনে সংরক্ষিত আছে।"
+                "বিস্তারিত error_log.json ফাইলে সংরক্ষিত হয়েছে।"
             ))
 
     def _ui(self, func, *args):
@@ -418,7 +413,7 @@ class CleanerApp:
         notebook.add(self.tab_quick, text="Quick Clean")
         notebook.add(self.tab_junk, text="Junk Cleanup")
         notebook.add(self.tab_browser, text="Browser && Network")
-        notebook.add(self.tab_startup, text="Startup Manager")
+        notebook.add(self.tab_startup, text="Startup && Shutdown")
         notebook.pack(fill="both", expand=True, padx=10, pady=(4, 10))
 
         self._build_quick_tab()
@@ -483,81 +478,6 @@ class CleanerApp:
         self.quick_status_label.pack(anchor="w", pady=(4, 0))
 
         self._refresh_quick_last_cleaned()
-
-        # ── Shutdown Auto-Clean ────────────────────────────────────────
-        # Moved here from the old "Automation && History" tab, which was
-        # removed since its other contents (scheduled task via schtasks)
-        # weren't needed. This section stays because it's the actual
-        # always-on cleaning mechanism.
-        ttk.Separator(wrapper).pack(fill="x", pady=14)
-        ttk.Label(wrapper, text="Shutdown Auto-Clean", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(
-            wrapper,
-            text="Automatically cleans temp files, cache, and thumbnails every time you shut down the PC.",
-            style="Muted.TLabel",
-            wraplength=560,
-            justify="left",
-        ).pack(anchor="w")
-        ttk.Label(
-            wrapper,
-            text="• Cleans: Temp files, Windows Temp, Chrome cache, Thumbnail cache, Error reports, Recycle Bin\n"
-                 "• Fast Startup is disabled automatically so the clean always runs\n"
-                 "• Requires Administrator rights to register",
-            style="Muted.TLabel",
-            justify="left",
-        ).pack(anchor="w", padx=10, pady=(4, 0))
-
-        sd_btn_row = ttk.Frame(wrapper)
-        sd_btn_row.pack(anchor="w", pady=6)
-        ttk.Button(
-            sd_btn_row, text="Enable Shutdown Clean",
-            style="Accent.TButton", command=self.enable_shutdown_clean
-        ).pack(side="left")
-        ttk.Button(
-            sd_btn_row, text="Disable Shutdown Clean",
-            command=self.disable_shutdown_clean
-        ).pack(side="left", padx=6)
-        ttk.Button(
-            sd_btn_row, text="Run Now (Test)",
-            command=self.run_shutdown_clean_now
-        ).pack(side="left")
-
-        self.shutdown_status_label = ttk.Label(wrapper, text="")
-        self.shutdown_status_label.pack(anchor="w")
-        self._refresh_shutdown_status()
-
-        self.shutdown_log = LogBox(wrapper, height=4)
-        self.shutdown_log.pack(fill="both", expand=False, pady=(4, 10))
-
-        # ── Error Log (automatic bug-handling safety net) ─────────────────
-        ttk.Separator(wrapper).pack(fill="x", pady=10)
-        ttk.Label(wrapper, text="Error Log", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(
-            wrapper,
-            text="If something unexpected ever goes wrong, the app catches it, keeps running, "
-                 "and saves the details here instead of crashing or failing silently.",
-            style="Muted.TLabel",
-            wraplength=560,
-            justify="left",
-        ).pack(anchor="w")
-
-        err_btn_row = ttk.Frame(wrapper)
-        err_btn_row.pack(anchor="w", pady=6)
-        ttk.Button(err_btn_row, text="Error Log দেখুন", command=self.show_error_log).pack(side="left")
-        ttk.Button(err_btn_row, text="Clear Error Log", command=self.clear_error_log).pack(side="left", padx=6)
-
-        self.error_indicator = ttk.Label(wrapper, text="")
-        self.error_indicator.pack(anchor="w")
-        self._refresh_error_indicator()
-
-        # ── History ─────────────────────────────────────────────────────
-        ttk.Separator(wrapper).pack(fill="x", pady=10)
-        ttk.Label(wrapper, text="Cleanup History", style="Section.TLabel").pack(anchor="w")
-        columns = ("date", "categories", "freed", "mode")
-        self.history_tree = ttk.Treeview(wrapper, columns=columns, show="headings", height=6)
-        for col, label in zip(columns, ("Date", "Categories Cleaned", "Space Freed", "Mode")):
-            self.history_tree.heading(col, text=label)
-        self.history_tree.pack(fill="both", expand=True, pady=5)
 
     def _refresh_quick_last_cleaned(self):
         history = history_log.read_history()
@@ -624,7 +544,6 @@ class CleanerApp:
             "bytes_freed": total_freed,
             "mode": "quick",
         })
-        self._refresh_history_view()
         self._refresh_quick_last_cleaned()
         self._refresh_header_drive_label()
 
@@ -836,7 +755,6 @@ class CleanerApp:
         })
         if not logged:
             self.junk_log.log("Warning: could not save this cleanup to the history log.")
-        self._refresh_history_view()
 
         system_drive = os.environ.get("SystemDrive", "C:") + "\\"
 
@@ -935,6 +853,19 @@ class CleanerApp:
         ttk.Button(frame, text="Flush DNS Cache", command=self.flush_dns).pack(anchor="w", padx=10, pady=5)
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
+        ttk.Label(frame, text="Chrome Profile Manager", style="Section.TLabel").pack(anchor="w", padx=10)
+        ttk.Label(
+            frame,
+            text="একসাথে অনেকগুলো Chrome প্রোফাইল নিরাপদে খোলে (CPU/RAM বেশি ব্যস্ত থাকলে প্রতিটার আগে অপেক্ষা করে, "
+                 "যাতে PC হ্যাং না করে), অথবা সব Chrome উইন্ডো বন্ধ করে PC শাটডাউন করে।",
+            style="Muted.TLabel", wraplength=760, justify="left",
+        ).pack(anchor="w", padx=10)
+        chrome_btn_frame = ttk.Frame(frame)
+        chrome_btn_frame.pack(anchor="w", padx=10, pady=5)
+        ttk.Button(chrome_btn_frame, text="সব Chrome প্রোফাইল খুলুন", style="Accent.TButton", command=self.open_chrome_profiles).pack(side="left")
+        ttk.Button(chrome_btn_frame, text="Chrome বন্ধ করে PC শাটডাউন করুন", style="Danger.TButton", command=self.close_chrome_and_shutdown).pack(side="left", padx=5)
+
+        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
         self.browser_log = LogBox(frame, height=8)
         self.browser_log.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -983,8 +914,29 @@ class CleanerApp:
         log = lambda m: self._ui(self.browser_log.log, m)
         threading.Thread(target=self._run_safely, args=(browser_core.flush_dns, log), daemon=True).start()
 
+    def open_chrome_profiles(self):
+        threading.Thread(target=self._run_safely, args=(self._open_chrome_profiles_worker,), daemon=True).start()
+
+    def _open_chrome_profiles_worker(self):
+        log = lambda m: self._ui(self.browser_log.log, m)
+        chrome_profile_manager.open_profiles(log=log)
+
+    def close_chrome_and_shutdown(self):
+        if not messagebox.askyesno(
+            "নিশ্চিত করুন",
+            "এটা এখনই সব Chrome উইন্ডো বন্ধ করে PC শাটডাউন করবে।\n\n"
+            "Chrome-এর ট্যাব/সেশন স্বাভাবিকভাবে সেভ হয়ে পরে ফিরে আসবে, কিন্তু অন্য কোনো "
+            "প্রোগ্রামে সেভ না করা কাজ থাকলে সেটা হারিয়ে যেতে পারে।\n\nচালিয়ে যাবেন?",
+        ):
+            return
+        threading.Thread(target=self._run_safely, args=(self._close_chrome_and_shutdown_worker,), daemon=True).start()
+
+    def _close_chrome_and_shutdown_worker(self):
+        log = lambda m: self._ui(self.browser_log.log, m)
+        chrome_profile_manager.close_chrome_and_shutdown(log=log)
+
     # ------------------------------------------------------------------
-    # Tab 4: Startup Manager
+    # Tab 3: Startup && Shutdown
     # ------------------------------------------------------------------
     def _build_startup_tab(self):
         frame = self.tab_startup
@@ -998,14 +950,42 @@ class CleanerApp:
         ttk.Button(btn_row, text="Enable Selected", command=self.enable_selected_startup).pack(side="left")
 
         columns = ("name", "source", "status")
-        self.startup_tree = ttk.Treeview(frame, columns=columns, show="headings", height=14, selectmode="extended")
+        self.startup_tree = ttk.Treeview(frame, columns=columns, show="headings", height=9, selectmode="extended")
         for col, label in zip(columns, ("Name", "Location", "Status")):
             self.startup_tree.heading(col, text=label)
         self.startup_tree.pack(fill="both", expand=True, padx=10, pady=5)
 
-        self.startup_log = LogBox(frame, height=5)
-        self.startup_log.pack(fill="both", expand=False, padx=10, pady=10)
+        self.startup_log = LogBox(frame, height=4)
+        self.startup_log.pack(fill="both", expand=False, padx=10, pady=(0, 10))
         self.startup_items = []
+
+        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
+        ttk.Label(frame, text="Shutdown Auto-Clean", style="Section.TLabel").pack(anchor="w", padx=10)
+        ttk.Label(
+            frame,
+            text="Automatically cleans temp files, cache, and thumbnails every time you shut down the PC.",
+            style="Muted.TLabel", wraplength=560, justify="left",
+        ).pack(anchor="w", padx=10)
+        ttk.Label(
+            frame,
+            text="• Cleans: Temp files, Windows Temp, browser cache, Thumbnail cache, Error reports, Recycle Bin\n"
+                 "• Fast Startup is disabled automatically so the clean always runs\n"
+                 "• Registering/removing this requires Administrator rights",
+            style="Muted.TLabel", justify="left",
+        ).pack(anchor="w", padx=20, pady=(4, 0))
+
+        sd_btn_row = ttk.Frame(frame)
+        sd_btn_row.pack(anchor="w", padx=10, pady=6)
+        ttk.Button(sd_btn_row, text="Enable Shutdown Clean", style="Accent.TButton", command=self.enable_shutdown_clean).pack(side="left")
+        ttk.Button(sd_btn_row, text="Disable Shutdown Clean", command=self.disable_shutdown_clean).pack(side="left", padx=6)
+        ttk.Button(sd_btn_row, text="Run Now (Test)", command=self.run_shutdown_clean_now).pack(side="left")
+
+        self.shutdown_status_label = ttk.Label(frame, text="")
+        self.shutdown_status_label.pack(anchor="w", padx=10)
+        self._refresh_shutdown_status()
+
+        self.shutdown_log = LogBox(frame, height=4)
+        self.shutdown_log.pack(fill="both", expand=False, padx=10, pady=(4, 10))
 
     def refresh_startup_items(self):
         threading.Thread(target=self._run_safely, args=(self._refresh_startup_worker,), daemon=True).start()
@@ -1055,27 +1035,7 @@ class CleanerApp:
         self._ui(self.refresh_startup_items)
 
     # ------------------------------------------------------------------
-    # Shutdown Clean, Error Log, and History live in the Quick Clean tab
-    # now (see _build_quick_tab). The old "Automation && History" tab and
-    # its schtasks-based "Scheduled Auto-Clean" scheduler.py were removed
-    # entirely — Shutdown Auto-Clean fully replaces the same job with a
-    # more reliable mechanism, so keeping both around would just be
-    # redundant, unused surface area.
-    # ------------------------------------------------------------------
-
-    def _refresh_history_view(self):
-        self.history_tree.delete(*self.history_tree.get_children())
-        for entry in reversed(history_log.read_history()):
-            ts = entry.get("timestamp", "")
-            # Show category names instead of just a count
-            cat_ids = entry.get("categories", [])
-            cats_display = ", ".join(cat_ids) if cat_ids else "—"
-            freed = cleaner_core.format_size(entry.get("bytes_freed", 0))
-            mode = entry.get("mode", "manual")
-            self.history_tree.insert("", "end", values=(ts, cats_display, freed, mode))
-
-    # ------------------------------------------------------------------
-    # Shutdown Clean
+    # Shutdown Clean handlers (UI built as part of Tab 3 above)
     # ------------------------------------------------------------------
     def _refresh_shutdown_status(self):
         try:
@@ -1120,7 +1080,11 @@ class CleanerApp:
         log = lambda m: self._ui(self.shutdown_log.log, m)
         ok = shutdown_setup.setup_shutdown_clean(log)
         if ok:
-            log("✅ Done. The cleaner will now run silently on every shutdown.")
+            fast_startup_disabled = shutdown_setup.get_status().get("fast_startup_disabled", False)
+            if fast_startup_disabled:
+                log("✅ Done. The cleaner will now run silently on every shutdown.")
+            else:
+                log("✅ Registered — but see the Fast Startup warning above before relying on this.")
         else:
             log("❌ Setup failed. Check the log above.")
         self._ui(self._refresh_shutdown_status)
@@ -1156,52 +1120,9 @@ class CleanerApp:
             history_log.log_cleanup(result)
             freed = cleaner_core.format_size(result.get("bytes_freed", 0))
             log(f"✅ Test run done — freed {freed}")
-            self._ui(self._refresh_history_view)
         except Exception as exc:
             log(f"❌ Error: {exc}")
             error_log.record("run_shutdown_clean_now", exc)
-            self._ui(self._refresh_error_indicator)
-
-    # ------------------------------------------------------------------
-    # Error Log (automatic bug-handling safety net)
-    # ------------------------------------------------------------------
-    def _refresh_error_indicator(self):
-        n = error_log.count_errors()
-        if n:
-            self.error_indicator.config(
-                text=f"⚠ {n} টা টেকনিক্যাল সমস্যা লগ হয়েছে (কাজে বাধা দেয়নি)",
-                foreground=Theme.WARNING,
-            )
-        else:
-            self.error_indicator.config(text="✅ কোনো এরর লগ হয়নি", foreground=Theme.SUCCESS)
-
-    def show_error_log(self):
-        errors = error_log.read_errors()
-        win = tk.Toplevel(self.root)
-        win.title("Error Log")
-        win.geometry("760x520")
-        apply_theme(win)
-
-        if not errors:
-            ttk.Label(win, text="কোনো এরর লগ নেই — সবকিছু ঠিকঠাক চলছে।", padding=20).pack()
-            return
-
-        text = tk.Text(win, wrap="word", font=Theme.FONT_MONO, bg=Theme.SURFACE, fg=Theme.TEXT)
-        text.pack(fill="both", expand=True, padx=10, pady=10)
-        for e in reversed(errors[-50:]):
-            text.insert(
-                "end",
-                f"[{e.get('timestamp', '?')}] {e.get('context', '?')} — "
-                f"{e.get('error_type', '?')}: {e.get('message', '')}\n"
-            )
-            text.insert("end", f"{e.get('traceback', '')}\n{'-' * 70}\n")
-        text.config(state="disabled")
-
-    def clear_error_log(self):
-        if not messagebox.askyesno("Confirm", "Clear the entire error log?"):
-            return
-        error_log.clear_errors()
-        self._refresh_error_indicator()
 
 
 # ---------------------------------------------------------------------------
@@ -1210,9 +1131,10 @@ class CleanerApp:
 
 def run_auto_clean():
     """Legacy CLI entry point (python pc_cleaner.py --auto-clean).
-    The newer shutdown_clean.py (registered via the Automation tab's
-    "Shutdown Clean" button) is now the primary automatic-cleaning
-    path, but this is kept for anyone who scheduled this flag directly.
+    The newer shutdown_clean.py (registered via the "Shutdown Auto-Clean"
+    section of the Startup && Shutdown tab) is now the primary
+    automatic-cleaning path, but this is kept for anyone who scheduled
+    this flag directly (e.g. via their own Task Scheduler entry).
 
     Hardened the same way as shutdown_clean.py: one category's failure
     can't take down the rest of the run, and nothing here fails

@@ -20,15 +20,39 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install system dependencies for the GUI tests
+        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
+
       - name: Run the automated test suite
-        run: >
-          python -m unittest
-          test_cleaner_core
-          test_browser_core
-          test_history_log
-          test_error_log
-          test_scheduler
-          test_startup_manager
-          test_system_tools
-          test_no_network_guarantee
-          -v
+        # Auto-discovers every test_*.py file, so a new test file is
+        # picked up automatically instead of needing to be added to a
+        # hand-maintained list here. xvfb-run provides a virtual display
+        # so the real GUI integration tests (test_integration_gui.py)
+        # run too, not just the non-GUI logic tests.
+        run: xvfb-run -a python -m unittest discover -p "test_*.py" -v
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Ruff and mypy
+        run: pip install ruff mypy
+
+      - name: Lint with Ruff
+        run: ruff check .
+
+      - name: Type-check with mypy
+        # Informational for now, not blocking: the codebase predates
+        # type hints, so this is expected to report a backlog of
+        # findings rather than a clean pass. Remove continue-on-error
+        # once that backlog is addressed.
+        run: mypy .
+        continue-on-error: true
+
