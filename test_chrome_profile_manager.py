@@ -225,6 +225,122 @@ class TestOpenProfilesLogic(unittest.TestCase):
         self.assertEqual(mock_cmdlines.call_count, 1)
 
 
+class TestPidsForExe(unittest.TestCase):
+    """_pids_for_exe() is what makes the Chrome/Edge distinction
+    possible at all — everything below assumes it correctly separates
+    "this window's class name looks like Chrome" from "this window is
+    actually owned by a chrome.exe process"."""
+
+    def test_off_windows_returns_empty_set(self):
+        with patch.object(cpm, "is_windows", return_value=False):
+            self.assertEqual(cpm._pids_for_exe("chrome.exe"), set())
+
+    def test_parses_pids_from_tasklist_csv_output(self):
+        # Real `tasklist /FO CSV /NH` output shape: one quoted-CSV line
+        # per running process, PID is the second field.
+        csv_output = (
+            '"chrome.exe","1234","Console","1","123,456 K"\r\n'
+            '"chrome.exe","5678","Console","1","98,765 K"\r\n'
+        )
+        with patch.object(cpm, "is_windows", return_value=True), \
+             patch("chrome_profile_manager.subprocess.run",
+                   return_value=MagicMock(stdout=csv_output, returncode=0)):
+            self.assertEqual(cpm._pids_for_exe("chrome.exe"), {1234, 5678})
+
+    def test_no_matching_process_returns_empty_set(self):
+        # tasklist prints this exact message (localized) when the filter
+        # matches nothing - not a CSV data line, must not be parsed as one.
+        with patch.object(cpm, "is_windows", return_value=True), \
+             patch("chrome_profile_manager.subprocess.run",
+                   return_value=MagicMock(stdout="INFO: No tasks match the specified criteria.", returncode=0)):
+            self.assertEqual(cpm._pids_for_exe("chrome.exe"), set())
+
+    def test_subprocess_failure_returns_empty_set_not_raises(self):
+        with patch.object(cpm, "is_windows", return_value=True), \
+             patch("chrome_profile_manager.subprocess.run", side_effect=OSError("boom")):
+            self.assertEqual(cpm._pids_for_exe("chrome.exe"), set())
+
+
+class TestFilterChromeHandles(unittest.TestCase):
+    """The actual regression guard for the reported bug: Microsoft Edge
+    is Chromium-based and shares Chrome's exact window class name
+    ("Chrome_WidgetWin_1"), so a window matching that class is NOT
+    necessarily Chrome. A window only counts if its owning process id
+    is in the chrome.exe pid set."""
+
+    def test_chrome_owned_window_is_kept(self):
+        candidates = [(111, 100)]
+        self.assertEqual(cpm._filter_chrome_handles(candidates, {100}), [111])
+
+    def test_edge_window_with_matching_class_but_different_pid_is_excluded(self):
+        # hwnd 111 -> real Chrome (pid 100); hwnd 222 -> Edge sharing the
+        # same window class, but owned by a different (non-Chrome) pid.
+        candidates = [(111, 100), (222, 200)]
+        self.assertEqual(cpm._filter_chrome_handles(candidates, {100}), [111])
+
+    def test_no_chrome_pids_excludes_everything(self):
+        candidates = [(111, 100), (222, 200)]
+        self.assertEqual(cpm._filter_chrome_handles(candidates, set()), [])
+
+    def test_multiple_chrome_windows_all_kept(self):
+        candidates = [(111, 100), (222, 100), (333, 300)]
+        self.assertEqual(cpm._filter_chrome_handles(candidates, {100, 300}), [111, 222, 333])
+
+
+class TestChromeWindowHandlesEndToEnd(unittest.TestCase):
+    """Wires _pids_for_exe + the EnumWindows callback together with a
+    fake user32, confirming the process-id cross-check actually happens
+    inside _chrome_window_handles() itself, not just in the pure
+    helper above."""
+
+    def _fake_user32(self, windows):
+        """windows: list of (hwnd, class_name, pid)."""
+        user32 = MagicMock()
+
+        def enum_windows(callback, lparam):
+            for hwnd, _cls, _pid in windows:
+                callback(hwnd, lparam)
+            return True
+
+        def get_class_name_w(hwnd, buf, _size):
+            cls = next(c for h, c, _p in windows if h == hwnd)
+            buf.value = cls
+            return len(cls)
+
+        def get_window_thread_process_id(hwnd, pid_ptr):
+            pid = next(p for h, _c, p in windows if h == hwnd)
+            pid_ptr.contents.value = pid
+            return 1
+
+        user32.EnumWindows.side_effect = enum_windows
+        user32.IsWindowVisible.return_value = True
+        user32.GetClassNameW.side_effect = get_class_name_w
+        user32.GetWindowThreadProcessId.side_effect = get_window_thread_process_id
+        return user32
+
+    def test_edge_window_never_included_even_with_identical_class_name(self):
+        windows = [
+            (1, "Chrome_WidgetWin_1", 100),  # real Chrome window
+            (2, "Chrome_WidgetWin_1", 200),  # Edge window, same class
+        ]
+        fake_windll = MagicMock(user32=self._fake_user32(windows))
+        # WINFUNCTYPE doesn't exist on this non-Windows sandbox at all
+        # (unlike CFUNCTYPE); stand in with an identity wrapper so the
+        # real callback closure in _chrome_window_handles() still runs
+        # unmodified against our fake user32.EnumWindows above.
+        with patch.object(cpm, "is_windows", return_value=True), \
+             patch.object(cpm, "_pids_for_exe", return_value={100}), \
+             patch("chrome_profile_manager.ctypes.windll", fake_windll, create=True), \
+             patch("chrome_profile_manager.ctypes.WINFUNCTYPE", lambda *a, **k: (lambda f: f), create=True):
+            handles = cpm._chrome_window_handles()
+        self.assertEqual(handles, [1])
+
+    def test_no_chrome_process_running_skips_enumeration_entirely(self):
+        with patch.object(cpm, "is_windows", return_value=True), \
+             patch.object(cpm, "_pids_for_exe", return_value=set()):
+            self.assertEqual(cpm._chrome_window_handles(), [])
+
+
 class TestCloseAllChromeWindows(unittest.TestCase):
     def test_no_open_windows_is_reported_and_not_an_error(self):
         messages = []

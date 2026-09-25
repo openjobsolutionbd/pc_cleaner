@@ -20,12 +20,28 @@ select = ["E", "W", "F", "B", "UP", "SIM"]
 ignore = [
     "E501",  # line-too-long: the GUI-building code has long, dense
              # single-statement lines by convention; not worth flagging
+    "E731",  # lambda-assignment: `log = lambda msg: None` (an optional,
+             # swallow-or-forward log callback) is a deliberate, pervasive
+             # idiom across this codebase - dozens of call sites, always
+             # the same one-line shape. Rewriting each into a `def` is a
+             # purely cosmetic, high-diff change for no behavior benefit.
+    "SIM105",  # suppressible-exception: this codebase's core safety-net
+               # philosophy (see error_log.py's module docstring) is
+               # explicit `try/except: pass` around best-effort cleanup
+               # and "never let a failure become a new failure" spots -
+               # contextlib.suppress is equivalent but not worth a
+               # mechanical rewrite of every one of these.
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # Test files intentionally do things Ruff would otherwise flag, e.g.
 # unittest.mock.patch() targets that look like unused imports.
 "test_*.py" = ["F401"]
+# shutdown_clean.py must add its own directory to sys.path *before*
+# importing its sibling modules (it can be launched by Group Policy with
+# CWD set to System32 - see the module's own "Bootstrap" comment), so
+# these imports cannot be moved above that sys.path fix.
+"shutdown_clean.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.10"

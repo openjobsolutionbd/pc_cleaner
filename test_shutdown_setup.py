@@ -18,8 +18,6 @@ one happened, since Windows skips shutdown scripts during Fast Startup.
 Run with: python -m unittest test_shutdown_setup.py -v
 """
 
-import sys
-import types
 import unittest
 import unittest.mock
 
@@ -62,7 +60,6 @@ class FakeWinReg:
         return _FakeKeyHandle(self, hive, path)
 
     def SetValueEx(self, key_handle, name, reserved, value_type, value):
-        bucket_key = (key_handle.hive, key_handle.path)
         if (key_handle.hive, key_handle.path, name) in self.fail_set_on:
             raise PermissionError("access denied (fake)")
         self._bucket(key_handle.hive, key_handle.path, create=True)[name] = (value, value_type)
@@ -107,28 +104,28 @@ class _FakeKeyHandle:
 
 
 class ShutdownSetupTestCase(unittest.TestCase):
-    """Stubs winreg into sys.modules (so the module-level `import winreg`
-    succeeds at all) and patches shutdown_setup.winreg with a fresh fake
-    per test, plus a fake ctypes.windll so _is_admin() doesn't crash.
+    """Patches shutdown_setup.winreg with a fresh in-memory fake per test
+    (create=True since the real import fails on this non-Windows
+    sandbox, leaving no such attribute to patch over — same pattern as
+    test_startup_manager.py) and forces is_windows() True so the
+    Windows-only code paths under test actually run here instead of
+    short-circuiting on the platform check.
     """
 
     @classmethod
     def setUpClass(cls):
-        if "winreg" not in sys.modules or not hasattr(sys.modules["winreg"], "_is_fake_stub"):
-            fake_module = types.ModuleType("winreg")
-            fake_module._is_fake_stub = True
-            for name in ["HKEY_LOCAL_MACHINE", "KEY_SET_VALUE", "KEY_READ", "REG_SZ", "REG_DWORD", "REG_BINARY"]:
-                setattr(fake_module, name, 0)
-            sys.modules["winreg"] = fake_module
         import shutdown_setup
         cls.ss = shutdown_setup
 
     def setUp(self):
         self.fake = FakeWinReg()
-        self._winreg_patch = unittest.mock.patch.object(self.ss, "winreg", self.fake)
+        self._winreg_patch = unittest.mock.patch.object(self.ss, "winreg", self.fake, create=True)
         self._winreg_patch.start()
+        self._is_windows_patch = unittest.mock.patch.object(self.ss, "is_windows", return_value=True)
+        self._is_windows_patch.start()
 
     def tearDown(self):
+        self._is_windows_patch.stop()
         self._winreg_patch.stop()
 
 
@@ -307,6 +304,47 @@ class TestGetStatus(ShutdownSetupTestCase):
         with unittest.mock.patch.object(self.ss.subprocess, "run", return_value=unittest.mock.Mock(returncode=1)):
             status = self.ss.get_status()
         self.assertTrue(status["gpo_registered"])
+
+
+class TestGracefulDegradationOffWindows(unittest.TestCase):
+    """Pins the actual bug: shutdown_setup.py used to do a bare
+    `import winreg` at module level, which raised ModuleNotFoundError
+    immediately on any non-Windows machine — including this Linux CI
+    sandbox — so importing pc_cleaner.py (which imports this module)
+    crashed before a single test could run. winreg is now optional,
+    and every registry-touching function checks is_windows() first.
+
+    Deliberately does NOT use ShutdownSetupTestCase / patch winreg or
+    is_windows here — this exercises the real, unpatched behavior on
+    the real (non-Windows) sandbox, confirming every entry point
+    degrades to a safe default instead of raising.
+    """
+
+    def test_module_imported_without_crashing(self):
+        # If this test exists and runs at all, the module-level import
+        # at the top of this file already succeeded - this assertion
+        # just documents *why* that matters.
+        import shutdown_setup
+        self.assertIsNotNone(shutdown_setup)
+
+    def test_is_windows_false_on_this_sandbox(self):
+        import shutdown_setup
+        self.assertFalse(shutdown_setup.is_windows())
+
+    def test_registry_functions_return_safe_defaults(self):
+        import shutdown_setup as ss
+        self.assertFalse(ss.disable_fast_startup(log=lambda m: None))
+        self.assertFalse(ss.enable_fast_startup(log=lambda m: None))
+        self.assertFalse(ss.get_fast_startup_status())
+        self.assertFalse(ss._is_gpo_registered())
+        self.assertTrue(ss._unregister_gpo(log=lambda m: None))  # nothing to remove -> success
+
+    def test_register_gpo_reports_unavailable_and_falls_through(self):
+        import shutdown_setup as ss
+        messages = []
+        ok = ss._register_gpo(log=messages.append)
+        self.assertFalse(ok)
+        self.assertTrue(any("not on windows" in m.lower() for m in messages))
 
 
 if __name__ == "__main__":

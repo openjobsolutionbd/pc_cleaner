@@ -57,7 +57,7 @@ def _imported_module_names(filepath: str) -> set:
     """Parses a .py file with ast (not by executing it) and returns the
     set of top-level module names it imports, e.g. "os.path" -> "os".
     """
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=filepath)
 
     names = set()
@@ -65,9 +65,8 @@ def _imported_module_names(filepath: str) -> set:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 names.add(alias.name.split(".")[0])
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                names.add(node.module.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module.split(".")[0])
     return names
 
 

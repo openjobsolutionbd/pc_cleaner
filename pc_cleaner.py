@@ -33,7 +33,7 @@ import shutdown_setup
 import error_log
 
 
-__version__ = "1.4.4"
+__version__ = "1.4.5"
 
 
 # ----------------------------------------------------------------------
@@ -422,7 +422,7 @@ class CleanerApp:
         self._build_startup_tab()
 
     def _refresh_header_drive_label(self):
-        system_drive = os.environ.get("SystemDrive", "C:") + "\\"
+        system_drive = os.environ.get("SYSTEMDRIVE", "C:") + "\\"
         usage = system_tools.get_free_space(system_drive)
         if usage:
             total, used, free = usage
@@ -691,7 +691,7 @@ class CleanerApp:
         ):
             return
         self.clean_btn.config(state="disabled")
-        system_drive = os.environ.get("SystemDrive", "C:") + "\\"
+        system_drive = os.environ.get("SYSTEMDRIVE", "C:") + "\\"
         usage_before = system_tools.get_free_space(system_drive)
         self._free_before = usage_before[2] if usage_before else None
         threading.Thread(target=self._run_safely, args=(self._clean_junk_worker, selected,), daemon=True).start()
@@ -756,7 +756,7 @@ class CleanerApp:
         if not logged:
             self.junk_log.log("Warning: could not save this cleanup to the history log.")
 
-        system_drive = os.environ.get("SystemDrive", "C:") + "\\"
+        system_drive = os.environ.get("SYSTEMDRIVE", "C:") + "\\"
 
         if self._free_before is not None:
             usage_after = system_tools.get_free_space(system_drive)
@@ -862,8 +862,16 @@ class CleanerApp:
         ).pack(anchor="w", padx=10)
         chrome_btn_frame = ttk.Frame(frame)
         chrome_btn_frame.pack(anchor="w", padx=10, pady=5)
-        ttk.Button(chrome_btn_frame, text="সব Chrome প্রোফাইল খুলুন", style="Accent.TButton", command=self.open_chrome_profiles).pack(side="left")
-        ttk.Button(chrome_btn_frame, text="Chrome বন্ধ করে PC শাটডাউন করুন", style="Danger.TButton", command=self.close_chrome_and_shutdown).pack(side="left", padx=5)
+        self.open_chrome_profiles_btn = ttk.Button(
+            chrome_btn_frame, text="সব Chrome প্রোফাইল খুলুন", style="Accent.TButton",
+            command=self.open_chrome_profiles,
+        )
+        self.open_chrome_profiles_btn.pack(side="left")
+        self.close_chrome_shutdown_btn = ttk.Button(
+            chrome_btn_frame, text="Chrome বন্ধ করে PC শাটডাউন করুন", style="Danger.TButton",
+            command=self.close_chrome_and_shutdown,
+        )
+        self.close_chrome_shutdown_btn.pack(side="left", padx=5)
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
         self.browser_log = LogBox(frame, height=8)
@@ -915,11 +923,16 @@ class CleanerApp:
         threading.Thread(target=self._run_safely, args=(browser_core.flush_dns, log), daemon=True).start()
 
     def open_chrome_profiles(self):
+        self.open_chrome_profiles_btn.config(state="disabled")
         threading.Thread(target=self._run_safely, args=(self._open_chrome_profiles_worker,), daemon=True).start()
 
     def _open_chrome_profiles_worker(self):
         log = lambda m: self._ui(self.browser_log.log, m)
         chrome_profile_manager.open_profiles(log=log)
+        self._ui(self._open_chrome_profiles_done)
+
+    def _open_chrome_profiles_done(self):
+        self.open_chrome_profiles_btn.config(state="normal")
 
     def close_chrome_and_shutdown(self):
         if not messagebox.askyesno(
@@ -929,11 +942,16 @@ class CleanerApp:
             "প্রোগ্রামে সেভ না করা কাজ থাকলে সেটা হারিয়ে যেতে পারে।\n\nচালিয়ে যাবেন?",
         ):
             return
+        self.close_chrome_shutdown_btn.config(state="disabled")
         threading.Thread(target=self._run_safely, args=(self._close_chrome_and_shutdown_worker,), daemon=True).start()
 
     def _close_chrome_and_shutdown_worker(self):
         log = lambda m: self._ui(self.browser_log.log, m)
         chrome_profile_manager.close_chrome_and_shutdown(log=log)
+        self._ui(self._close_chrome_and_shutdown_done)
+
+    def _close_chrome_and_shutdown_done(self):
+        self.close_chrome_shutdown_btn.config(state="normal")
 
     # ------------------------------------------------------------------
     # Tab 3: Startup && Shutdown
@@ -951,7 +969,7 @@ class CleanerApp:
 
         columns = ("name", "source", "status")
         self.startup_tree = ttk.Treeview(frame, columns=columns, show="headings", height=9, selectmode="extended")
-        for col, label in zip(columns, ("Name", "Location", "Status")):
+        for col, label in zip(columns, ("Name", "Location", "Status"), strict=True):
             self.startup_tree.heading(col, text=label)
         self.startup_tree.pack(fill="both", expand=True, padx=10, pady=5)
 
@@ -1108,7 +1126,6 @@ class CleanerApp:
         log = lambda m: self._ui(self.shutdown_log.log, m)
         try:
             import shutdown_clean
-            import logging
             # Use a simple lambda logger so output goes to GUI
             class _GuiLogger:
                 def info(self, m): log(m)

@@ -4,7 +4,7 @@
 
 ## প্রজেক্ট কী
 
-Windows-এর জন্য একটা Junk cleanup + সিস্টেম মেইনটেন্যান্স Python/tkinter GUI অ্যাপ (নাম: **PC Cleaner**, বর্তমান ভার্সন **v1.4.4**), `.exe`-এ বিল্ড হয়। ব্যবহারকারী কোডিং জানেন না, মোবাইল থেকে কাজ করেন — তাই যেকোনো পরিবর্তন সবসময় স্পষ্ট বাংলা ব্যাখ্যাসহ, অ্যাপ্রুভাল নিয়ে করতে হবে।
+Windows-এর জন্য একটা Junk cleanup + সিস্টেম মেইনটেন্যান্স Python/tkinter GUI অ্যাপ (নাম: **PC Cleaner**, বর্তমান ভার্সন **v1.4.5**), `.exe`-এ বিল্ড হয়। ব্যবহারকারী কোডিং জানেন না, মোবাইল থেকে কাজ করেন — তাই যেকোনো পরিবর্তন সবসময় স্পষ্ট বাংলা ব্যাখ্যাসহ, অ্যাপ্রুভাল নিয়ে করতে হবে।
 
 **মূল উদ্দেশ্য (ব্যবহারকারীর নিজের ভাষায়, স্পষ্টভাবে বলা হয়েছে):** পিসিতে নিয়মিত জমে থাকা জাংক ফাইল ক্লিন রাখা, শাটডাউনের সময় এটা অটোমেটিক হওয়া, ব্রাউজার যেন স্মুথ ও দ্রুত থাকে সেজন্য ব্রাউজারে জমা ময়লা পরিষ্কার করা, আর সবচেয়ে গুরুত্বপূর্ণ — **এমন কোনো ফাইল কখনো ডিলিট না হওয়া যেটা কম্পিউটার চালাতে সমস্যা করে**। যেকোনো নতুন ফিচার বিবেচনা করার সময় এই চারটা লক্ষ্যের সাথে মেলে কিনা যাচাই করা উচিত — বিশেষ করে নিরাপত্তার শর্তটা (নিচের হার্ড গ্যারান্টি লিস্ট) কখনো শিথিল করা যাবে না, এমনকি স্পিড বা কনভিনিয়েন্সের জন্যও না।
 
@@ -24,16 +24,15 @@ Windows-এর জন্য একটা Junk cleanup + সিস্টেম �
 | `chrome_profile_manager.py` | Chrome Profile Manager — একসাথে অনেক প্রোফাইল CPU/RAM-থ্রটলড খোলা, বা সব Chrome বন্ধ করে PC শাটডাউন (দেখুন নিচের সেকশন) |
 | `system_tools.py` | Disk analyzer, empty folder finder, icon cache, drive helpers, root/critical-folder protection (`is_protected_root`) — **GUI ট্যাব v1.4.0-এ সরানো হয়েছে, মডিউল ও টেস্ট রয়ে গেছে** (header-এর ফ্রি-স্পেস pill এখনো এটা ব্যবহার করে) |
 | `startup_manager.py` | Startup প্রোগ্রাম চালু/বন্ধ (registry backup key: `PCCleanerBackup`) — এখন Startup && Shutdown ট্যাবে |
-| `scheduler.py` | Windows Task Scheduler দিয়ে অটো-ক্লিন (task name: `PCCleanerAutoClean`), Time ফিল্ড ভ্যালিডেশন (`is_valid_time_format`) — **GUI ট্যাব v1.4.0-এ সরানো হয়েছে, মডিউল ও টেস্ট রয়ে গেছে** (pc_cleaner.py আর ইম্পোর্ট করে না) |
 | `history_log.py` | ক্লিনআপ লগ (ডেটা ফোল্ডার: `%LOCALAPPDATA%\PCCleaner`) — এখনো প্রতিটা ক্লিনআপে লেখা হয়, শুধু দেখার UI নেই |
 | `error_log.py` | এরর লগ (`error_log.json`) — এখনো প্রতিটা এররে লেখা হয়, শুধু দেখার UI নেই |
-| `test_*.py` | প্রতিটা মডিউলের ইউনিট/ইন্টিগ্রেশন টেস্ট (১৯৮টা, GUI-সহ) — `test_no_network_guarantee.py` সহ, এখন `test_shutdown_setup.py`-ও |
+| `test_*.py` | প্রতিটা মডিউলের ইউনিট/ইন্টিগ্রেশন টেস্ট (১৯৯টা, GUI-সহ) |
 | `Start_Here.bat` / `build_exe.bat` / `run_tests.bat` | লঞ্চার / .exe বিল্ড (`PCCleaner.exe`, `--onedir`) / টেস্ট রানার |
 | `lint.bat` / `pyproject.toml` | ঐচ্ছিক dev-টুল: Ruff (lint) + mypy (type check) — অ্যাপে বান্ডেল হয় না, শুধু ডেভেলপমেন্টে ব্যবহার হয়
 
 ## যাচাইয়ের পদ্ধতি
 
-এই sandbox-এ `apt-get install python3-tk xvfb` করে `xvfb-run python3 -m unittest discover` দিয়ে সব ১৯৮টা টেস্ট (GUI-সহ) বাস্তবে চালিয়ে যাচাই করা যায় — GUI ভিজুয়াল যাচাইয়ের জন্য headless স্ক্রিনশটও নেওয়া সম্ভব। কোড শুধু পড়ে/কম্পাইল করে অনুমান না করে সবসময় বাস্তবে চালিয়ে যাচাই করা হয়। (নোট: এই নির্দিষ্ট sandbox session-এ apt-এর নেটওয়ার্ক অ্যাক্সেস ব্লকড ছিল বলে `python3-tk` ইনস্টল করা যায়নি — তখন `libarchive`/`ctypes` দিয়ে ম্যানুয়ালি আর্কাইভ পড়া হয়েছে এবং একটা হালকা tkinter স্টাব দিয়ে GUI-ওয়্যারিং যাচাই করা হয়েছে; non-GUI ১৮৩টা টেস্ট বাস্তবে রান করে দেখা হয়েছে। CI-তে (GitHub Actions) এখন Xvfb ইনস্টল করা থাকায় GUI টেস্টসহ সবকটাই সত্যিই রান হয়।)
+এই sandbox-এ `apt-get install python3-tk xvfb` করে `xvfb-run python3 -m unittest discover` দিয়ে সব ১৯৯টা টেস্ট (GUI-সহ) বাস্তবে চালিয়ে যাচাই করা যায় — GUI ভিজুয়াল যাচাইয়ের জন্য headless স্ক্রিনশটও নেওয়া সম্ভব। কোড শুধু পড়ে/কম্পাইল করে অনুমান না করে সবসময় বাস্তবে চালিয়ে যাচাই করা হয়। (নোট: এই নির্দিষ্ট sandbox session-এ apt-এর নেটওয়ার্ক অ্যাক্সেস ব্লকড ছিল বলে `python3-tk` ইনস্টল করা যায়নি — তখন `libarchive`/`ctypes` দিয়ে ম্যানুয়ালি আর্কাইভ পড়া হয়েছে এবং একটা হালকা tkinter স্টাব দিয়ে GUI-ওয়্যারিং যাচাই করা হয়েছে; non-GUI ১৮৩টা টেস্ট বাস্তবে রান করে দেখা হয়েছে। CI-তে (GitHub Actions) এখন Xvfb ইনস্টল করা থাকায় GUI টেস্টসহ সবকটাই সত্যিই রান হয়।)
 
 ## Quick Clean ট্যাব (রোজকার ব্যবহারের জন্য)
 
@@ -80,7 +79,7 @@ Windows-এর জন্য একটা Junk cleanup + সিস্টেম �
 
 Startup Manager (বুটে কী চালু হয় দেখা/বন্ধ/চালু করা — রিভার্সিবল) আর Shutdown Auto-Clean (প্রতি শাটডাউনে স্বয়ংক্রিয় ক্লিন) একই ট্যাবে একসাথে আছে। হ্যান্ডলার মেথডগুলো: `_refresh_shutdown_status`, `enable_shutdown_clean`, `_enable_shutdown_worker`, `disable_shutdown_clean`, `_disable_shutdown_worker`, `run_shutdown_clean_now`, `_run_shutdown_clean_worker`।
 
-**System Tools ট্যাব ও Automation & History ট্যাবের বাকি অংশ (Scheduled Auto-Clean, Error Log ভিউয়ার, Cleanup History ভিউয়ার) ব্যবহারকারীর অনুরোধে GUI থেকে সরানো হয়েছে** — শুধু Shutdown Auto-Clean স্পষ্টভাবে রাখতে বলা হয়েছিল। `system_tools.py` আর `scheduler.py` মডিউল দুটো (আর তাদের টেস্ট) প্রজেক্টেই থেকে গেছে, শুধু GUI থেকে ডিসকানেক্ট — `system_tools.get_free_space()` এখনো header-এর ফ্রি-স্পেস pill-এর জন্য ব্যবহৃত হয়। `history_log`/`error_log` এখনো প্রতিটা ক্লিনআপ/এররে ডিস্কে লেখে, শুধু GUI-তে দেখার উপায় নেই — safety net (`_handle_gui_exception`, `_run_safely`) এখন সরাসরি "error_log.json ফাইলে সংরক্ষিত হয়েছে" বলে, কোনো নির্দিষ্ট বাটনের কথা বলে না। অব্যবহৃত `import scheduler` সরানো হয়েছে pc_cleaner.py থেকে।
+**System Tools ট্যাব ও Automation & History ট্যাবের বাকি অংশ (Scheduled Auto-Clean, Error Log ভিউয়ার, Cleanup History ভিউয়ার) ব্যবহারকারীর অনুরোধে GUI থেকে সরানো হয়েছে** — শুধু Shutdown Auto-Clean স্পষ্টভাবে রাখতে বলা হয়েছিল। `system_tools.py` মডিউল (আর তার টেস্ট) প্রজেক্টেই থেকে গেছে, শুধু GUI থেকে ডিসকানেক্ট — `system_tools.get_free_space()` এখনো header-এর ফ্রি-স্পেস pill-এর জন্য ব্যবহৃত হয়। `history_log`/`error_log` এখনো প্রতিটা ক্লিনআপ/এররে ডিস্কে লেখে, শুধু GUI-তে দেখার উপায় নেই — safety net (`_handle_gui_exception`, `_run_safely`) এখন সরাসরি "error_log.json ফাইলে সংরক্ষিত হয়েছে" বলে, কোনো নির্দিষ্ট বাটনের কথা বলে না। অব্যবহৃত `import scheduler` সরানো হয়েছে pc_cleaner.py থেকে। (`scheduler.py` মডিউলটা নিজেই তখন GUI-ডিসকানেক্টেড অবস্থায় রয়ে গিয়েছিল ভবিষ্যতের জন্য, কিন্তু v1.4.5-এ যেহেতু আর ব্যবহারের পরিকল্পনা নেই বলে নিশ্চিত হওয়া গেছে, সেটা এবং তার টেস্ট সম্পূর্ণ মুছে ফেলা হয়েছে।)
 
 **টেস্ট:** `test_integration_gui.py`-তে `TestTabStructure` (ঠিক ৪টা ট্যাব, `tab_tools`/`tab_auto` attribute হিসেবে নেই, Startup আর Shutdown Clean widget একই ট্যাবে) এবং `TestShutdownCleanIntegration` (Run Now ব্যাকগ্রাউন্ড থ্রেডে চলে, history-তে লগ করে, error হলে ক্র্যাশ না করে log-এ দেখায়)।
 
@@ -119,7 +118,23 @@ Junk স্ক্যান আর ক্লিন-এর মূল দুইট�
 ## নিরাপত্তা: অফলাইন-গ্যারান্টি ও Time ইনপুট ভ্যালিডেশন
 
 - **`test_no_network_guarantee.py`** — নতুন স্বতন্ত্র টেস্ট ফাইল যেটা প্রজেক্টের প্রতিটা `.py` সোর্স ফাইল (`ast` দিয়ে পার্স করে, রান না করে) স্ক্যান করে নিশ্চিত করে কোথাও network লাইব্রেরি (socket, urllib, requests, ftplib, smtplib ইত্যাদি) ইম্পোর্ট করা হয়নি। কেউ ভবিষ্যতে ভুলবশত network কোড যোগ করলে এই টেস্ট সাথে সাথে fail করবে এবং ঠিক কোন ফাইলে কী পাওয়া গেছে তা বলে দেবে।
-- **`scheduler.is_valid_time_format()`** — যখন Scheduled Auto-Clean-এর UI ছিল (v1.4.0-এ সরানো হয়েছে), Time ফিল্ড (একমাত্র ফ্রি-টেক্সট ইনপুট যেটা `schtasks` subprocess কমান্ডে যেত) কঠোরভাবে "HH:MM" ফরম্যাট যাচাই করত, ভুল/অস্বাভাবিক ইনপুট থাকলে subprocess কল-ই না করে সরাসরি রিজেক্ট করত। ফাংশনটা `scheduler.py`-তে ও তার টেস্ট এখনো আছে (defense-in-depth হিসেবে রাখা হয়েছে যদি ভবিষ্যতে UI আবার যোগ হয়), শুধু pc_cleaner.py আর এটা কল করে না।
+- **`scheduler.is_valid_time_format()`** — যখন Scheduled Auto-Clean-এর UI ছিল (v1.4.0-এ সরানো হয়েছে), Time ফিল্ড (একমাত্র ফ্রি-টেক্সট ইনপুট যেটা `schtasks` subprocess কমান্ডে যেত) কঠোরভাবে "HH:MM" ফরম্যাট যাচাই করত, ভুল/অস্বাভাবিক ইনপুট থাকলে subprocess কল-ই না করে সরাসরি রিজেক্ট করত। এই ফাংশনসহ পুরো `scheduler.py` মডিউল ও তার টেস্ট v1.4.5-এ সম্পূর্ণ মুছে ফেলা হয়েছে (নিচের v1.4.5 সেকশন দেখুন)।
+
+## বাগ হান্ট + লিন্ট ক্লিনআপ (v1.4.5)
+
+ব্যবহারকারী নিজে টেস্ট স্যুট, `ruff`/`mypy`, আর ম্যানুয়াল কোড রিভিউ চালিয়ে ৪টা বাগ রিপোর্ট করেছিলেন — সবকটা আগে বাস্তবে reproduce করে, তারপর ফিক্স করে, আবার বাস্তবে verify করা হয়েছে:
+
+**১. CI লাল হওয়ার দুই কারণ, দুটোই ঠিক করা হয়েছে।** `shutdown_setup.py`-তে `import winreg` কোনো গার্ড ছাড়া top-level-এ ছিল (`startup_manager.py`-র মতো try/except ছিল না) — Windows ছাড়া যেকোনো মেশিনে (এই Linux sandbox, GitHub Actions CI) `pc_cleaner.py` ইমপোর্ট করলেই সাথে সাথে `ModuleNotFoundError` দিয়ে ক্র্যাশ করত, ফলে `test_integration_gui.py` কখনো রানই হতো না। এখন ঐচ্ছিক ইমপোর্ট (`_HAS_WINREG`) + নতুন `is_windows()` গার্ড ৬টা registry-touching ফাংশনে যোগ হয়েছে — অন্য মডিউলের established প্যাটার্নই। `test_shutdown_setup.py`-ও সেই অনুযায়ী সহজ করা হয়েছে (আগে `sys.modules` স্টাব করে ঘুরপথে ইমপোর্ট করানো হতো, যেটা import-order-এর উপর নির্ভরশীল ছিল), আর একটা নতুন টেস্ট ক্লাস (`TestGracefulDegradationOffWindows`) যোগ হয়েছে যেটা এই non-Windows sandbox-এ আসল, unpatched বিহেভিয়ার সরাসরি যাচাই করে।
+
+দ্বিতীয় কারণ: `.github/workflows/tests.yml`-এর lint job-এ `ruff check .` স্টেপে `continue-on-error` ছিল না (mypy-তে ছিল), আর বাস্তবে `ruff` চালিয়ে ৬০টা finding পাওয়া গিয়েছিল। প্রতিটা category ম্যানুয়ালি রিভিউ করা হয়েছে: ৪১টা (`E731` — `log = lambda...` প্যাটার্ন, ২৭টা; আর `SIM105` — best-effort `try/except: pass`, ১৪টা) এই কোডবেসের ইচ্ছাকৃত, বহুল-ব্যবহৃত idiom বলে চিহ্নিত করে কারণসহ `pyproject.toml`-এ ignore করা হয়েছে (mypy-র জন্য আগে থেকেই যেমন ডকুমেন্টেড আছে)। বাকি ১৯টা (loop-variable capture ৪টা, `SIM112`/`UP015`/ইত্যাদি ছোট জিনিস, ১টা genuinely unused variable, ১টা unused import) সরাসরি কোডে ফিক্স হয়েছে। ফলাফল: `ruff check .` এখন সত্যিকারভাবেই exit code ০ — তাই workflow ফাইলে `continue-on-error` যোগ করারই দরকার হয়নি, lint স্টেপ এখনো হার্ড-ব্লকিং, যেটা প্রকৃতপক্ষে ভালো (ভবিষ্যতে নতুন lint সমস্যা এলে CI সত্যিই আটকাবে)।
+
+**২. Chrome Profile Manager-এ Chrome/Edge মিক্সআপ।** `_chrome_window_handles()` শুধু window class name (`Chrome_WidgetWin_1`) দিয়ে Chrome চিনত — কিন্তু Microsoft Edge-ও Chromium-based বলে ঠিক একই class name ব্যবহার করে। প্রোফাইল খোলার সময় এটা সমস্যা করত না (শুধু before/after কাউন্ট হিসেবে ব্যবহৃত হতো), কিন্তু "Chrome বন্ধ করে PC শাটডাউন করুন" বাটনে `close_all_chrome_windows()` প্রতিটা matching window-কে `WM_CLOSE` পাঠাত — অর্থাৎ Edge-এ সেভ-না-করা কাজও হারানোর সত্যিকারের ঝুঁকি ছিল। ফিক্স: নতুন `_pids_for_exe()` হেল্পার `tasklist`-এর মাধ্যমে chrome.exe-এর আসল PID সেট বের করে, আর প্রতিটা window-এর `GetWindowThreadProcessId()`-এর সাথে সেটা ক্রস-চেক করা হয় — filtering লজিকটা `_filter_chrome_handles()` নামে একটা ছোট pure function-এ আলাদা করা হয়েছে যাতে ctypes-লেভেল মক ছাড়াই সরাসরি টেস্ট করা যায়। ১০টা নতুন টেস্ট যোগ হয়েছে, যার মধ্যে একটা সত্যিকারের end-to-end টেস্ট আছে যেটা fake `user32`/`EnumWindows` দিয়ে হুবহু রিপোর্ট করা সিনারিও (একই class name, ভিন্ন process) পিন করে রাখে।
+
+**৩. Chrome Profile Manager-এর দুটো বাটনে ডাবল-ট্যাপ প্রোটেকশন ছিল না।** বাকি লম্বা-চলা কাজের বাটন (Quick Clean, Scan, Clean Selected) কাজ চলাকালীন নিজেকে disable রাখে, কিন্তু "সব Chrome প্রোফাইল খুলুন" আর "Chrome বন্ধ করে শাটডাউন" বাটন দুটো তা করত না। এখন দুটো বাটনই `self.xxx_btn` হিসেবে instance attribute-এ সেভ হয়, worker শুরুর আগে disable আর শেষে (একটা নতুন `_done` কলব্যাকের মাধ্যমে) আবার enable হয় — বাকি বাটনগুলোর প্যাটার্নই।
+
+**৪. `scheduler.py` (আর তার টেস্ট) সম্পূর্ণ মুছে ফেলা হয়েছে।** v1.4.0-এ GUI থেকে ডিসকানেক্ট করার পর ভবিষ্যতে ফিরিয়ে আনার সম্ভাবনার জন্য রাখা হয়েছিল, কিন্তু আর কোনো পরিকল্পনা নেই বলে নিশ্চিত হওয়ার পর মুছে ফেলা হয়েছে (docs-এর সব রেফারেন্সও আপডেট করা হয়েছে)। `system_tools.py` একই কারণে GUI থেকে ডিসকানেক্টেড কিন্তু প্রজেক্টে আছে — সেটা অপরিবর্তিত রাখা হয়েছে (`get_free_space()` এখনো header-এ ব্যবহৃত হয়)।
+
+ছোট নোট: একটা অব্যবহৃত `import logging` (`_run_shutdown_clean_worker`-এর ভেতরে) সরানো হয়েছে। মোট টেস্ট ১৯৮ → ১৯৯ (scheduler-এর টেস্ট বাদ, নতুন ১৪টা যোগ)। পুরো স্যুট পরপর ৩ বার চালিয়ে যাচাই করা হয়েছে — প্রতিবার ১৯৯/১৯৯।
 
 ## পরিচিত সীমাবদ্ধতা
 - প্রথমবার চালাতে Windows-এ Python ইনস্টল থাকা আবশ্যক (bundled exe নেই)

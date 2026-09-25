@@ -170,24 +170,83 @@ def cpu_percent(sample_seconds: float = LOAD_SAMPLE_SECONDS) -> float:
 # ----------------------------------------------------------------------
 # Chrome window / process helpers
 # ----------------------------------------------------------------------
+def _pids_for_exe(exe_name: str) -> set:
+    """Returns the set of currently-running process IDs for an
+    executable name (e.g. "chrome.exe"), via `tasklist`. Empty set off
+    Windows or if the call fails — callers must treat that as "no
+    match, skip it", never as "everything matches". Fail-safe direction
+    matters here: this feeds the window-closing logic below, and it's
+    far better to leave a Chrome window unclosed than to accidentally
+    close a window that only looks like Chrome.
+    """
+    if not is_windows():
+        return set()
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {exe_name}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=15,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+        pids = set()
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            fields = [f.strip('"') for f in line.strip().split('","')]
+            if len(fields) >= 2 and fields[1].isdigit():
+                pids.add(int(fields[1]))
+        return pids
+    except Exception:
+        return set()
+
+
+def _filter_chrome_handles(candidates: list, chrome_pids: set) -> list:
+    """candidates: list of (hwnd, pid) tuples for every visible window
+    that uses Chrome's window class. Returns only the hwnds whose
+    owning process id is actually in chrome_pids.
+
+    This is the actual fix for the Chrome/Edge mixup, pulled out as a
+    small pure function so the filtering logic can be tested directly
+    without needing to fake the Windows API calls that gather the
+    candidates in the first place.
+    """
+    return [hwnd for hwnd, pid in candidates if pid in chrome_pids]
+
+
 def _chrome_window_handles() -> list:
-    """Returns handles of all visible top-level Chrome windows."""
+    """Returns handles of all visible top-level windows that both use
+    Chrome's window class AND actually belong to a running chrome.exe
+    process.
+
+    The window-class check alone is NOT enough: Microsoft Edge is also
+    Chromium-based and uses the exact identical window class name
+    ("Chrome_WidgetWin_1"), so relying on class name alone here would
+    also match — and, via close_all_chrome_windows(), close — Edge
+    windows. Cross-checking each window's owning process id against
+    the set of running chrome.exe PIDs (via _pids_for_exe) is what
+    actually restricts this to Chrome.
+    """
     if not is_windows():
         return []
+    chrome_pids = _pids_for_exe("chrome.exe")
+    if not chrome_pids:
+        return []
+
     user32 = ctypes.windll.user32
     enum_proc_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
-    found = []
+    candidates = []
 
     def _callback(hwnd, _lparam):
         if user32.IsWindowVisible(hwnd):
             buf = ctypes.create_unicode_buffer(256)
             user32.GetClassNameW(hwnd, buf, 256)
             if buf.value == "Chrome_WidgetWin_1":
-                found.append(hwnd)
+                pid = ctypes.wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.pointer(pid))
+                candidates.append((hwnd, pid.value))
         return True
 
     user32.EnumWindows(enum_proc_type(_callback), 0)
-    return found
+    return _filter_chrome_handles(candidates, chrome_pids)
 
 
 def count_chrome_windows() -> int:

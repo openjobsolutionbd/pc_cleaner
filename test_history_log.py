@@ -83,7 +83,9 @@ class TestHistoryLog(unittest.TestCase):
             log_file = os.path.join(self.tmp, f"race_{i}.json")
             barrier = threading.Barrier(2)
 
-            def write(label):
+            # barrier/log_file default-bound at definition time - see the
+            # identical note in test_error_log.py's equivalent test.
+            def write(label, barrier=barrier, log_file=log_file):
                 barrier.wait()
                 hl.log_cleanup({"label": label}, log_file)
 

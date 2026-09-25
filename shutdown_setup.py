@@ -44,9 +44,19 @@ This module does that automatically by setting:
 
 import os
 import sys
-import winreg
 import subprocess
 from pathlib import Path
+
+# winreg is a Windows-only stdlib module. Importing it unconditionally
+# used to crash this module (and everything that imports it, e.g.
+# pc_cleaner.py) on any non-Windows machine, including Linux CI — same
+# platform-detection pattern startup_manager.py already uses for the
+# same reason.
+try:
+    import winreg
+    _HAS_WINREG = True
+except ImportError:
+    _HAS_WINREG = False
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +104,15 @@ def _is_admin() -> bool:
         return False
 
 
+def is_windows() -> bool:
+    """True only when running on Windows AND winreg actually imported.
+    Every function below that touches the registry checks this first
+    and degrades to a safe default instead of crashing — same pattern
+    as cleaner_core.is_windows() / startup_manager.is_windows().
+    """
+    return os.name == "nt" and _HAS_WINREG
+
+
 # ---------------------------------------------------------------------------
 # Fast Startup
 # ---------------------------------------------------------------------------
@@ -105,6 +124,8 @@ def disable_fast_startup(log=None) -> bool:
     """
     if log is None:
         log = print
+    if not is_windows():
+        return False
     try:
         with winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,
@@ -127,6 +148,8 @@ def enable_fast_startup(log=None) -> bool:
     """Re-enable Windows Fast Startup (restores default)."""
     if log is None:
         log = print
+    if not is_windows():
+        return False
     try:
         with winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,
@@ -144,6 +167,8 @@ def enable_fast_startup(log=None) -> bool:
 
 def get_fast_startup_status() -> bool:
     """Return True if Fast Startup is currently enabled."""
+    if not is_windows():
+        return False   # assume disabled off Windows
     try:
         with winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE, _FAST_STARTUP_KEY
@@ -159,6 +184,9 @@ def get_fast_startup_status() -> bool:
 # ---------------------------------------------------------------------------
 def _register_gpo(log) -> bool:
     """Write the shutdown script entry into the Group Policy Scripts registry."""
+    if not is_windows():
+        log("Method A unavailable (not on Windows) — trying Method B.")
+        return False
     pythonw = _pythonw()
     params = f'"{_SCRIPT}"'
     try:
@@ -183,6 +211,8 @@ def _register_gpo(log) -> bool:
 
 
 def _unregister_gpo(log) -> bool:
+    if not is_windows():
+        return True   # nothing to remove off Windows
     try:
         winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, _GPO_SCRIPTS_BASE)
         log("Removed Group Policy Shutdown Script entry.")
@@ -195,6 +225,8 @@ def _unregister_gpo(log) -> bool:
 
 
 def _is_gpo_registered() -> bool:
+    if not is_windows():
+        return False
     try:
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _GPO_SCRIPTS_BASE):
             return True
@@ -251,14 +283,16 @@ def _register_task(log) -> bool:
 </Task>"""
 
     import tempfile
-    tmp = tempfile.NamedTemporaryFile(
-        suffix=".xml", mode="w", encoding="utf-16", delete=False
-    )
+    tmp_path = None
     try:
-        tmp.write(xml)
-        tmp.close()
+        with tempfile.NamedTemporaryFile(
+            suffix=".xml", mode="w", encoding="utf-16", delete=False
+        ) as tmp:
+            tmp.write(xml)
+            tmp_path = tmp.name
+
         result = subprocess.run(
-            ["schtasks", "/Create", "/F", "/TN", _TASK_NAME, "/XML", tmp.name],
+            ["schtasks", "/Create", "/F", "/TN", _TASK_NAME, "/XML", tmp_path],
             capture_output=True, text=True
         )
         if result.returncode == 0:
@@ -270,10 +304,11 @@ def _register_task(log) -> bool:
         log(f"Task Scheduler registration error: {exc}")
         return False
     finally:
-        try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 def _unregister_task(log) -> bool:

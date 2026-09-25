@@ -103,9 +103,7 @@ def _should_clean(cat: dict) -> bool:
     if cat["id"] not in _SHUTDOWN_CLEAN_IDS:
         return False
     # Skip categories that need admin if we're not running elevated.
-    if cat.get("needs_admin") and not cleaner_core.is_admin():
-        return False
-    return True
+    return not cat.get("needs_admin") or cleaner_core.is_admin()
 
 
 # ---------------------------------------------------------------------------
