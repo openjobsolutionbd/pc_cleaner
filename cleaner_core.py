@@ -13,7 +13,7 @@ it possible to unit-test the risky parts (deletion) on any OS.
 """
 
 import os
-import shutil
+import stat
 import ctypes
 import ctypes.wintypes
 import subprocess
@@ -77,6 +77,89 @@ def get_dir_size(path: str) -> int:
     return total
 
 
+def _is_link_or_reparse_point(entry) -> bool:
+    """True for a symlink, a Windows junction, or any other reparse point.
+    Used for entries *inside* a folder being cleaned: we never follow or
+    delete these (same rule as the top level), because removing/entering
+    one could touch whatever it points at. If the type can't be read at
+    all, treat it as unsafe and leave it alone.
+    """
+    try:
+        if entry.is_symlink():
+            return True
+        attrs = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+        return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    except OSError:
+        return True
+
+
+def _remove_tree_best_effort(path: str, summary: dict) -> bool:
+    """Delete `path` and everything inside it, one entry at a time, and
+    NEVER stop at a file that can't be removed.
+
+    This replaces shutil.rmtree(), which aborts the whole folder at the
+    first locked/in-use file: everything it hadn't reached yet was left
+    behind even though it could have been deleted, and none of the bytes
+    already removed were counted. Here a locked file is recorded in
+    summary["skipped"] and the loop carries on with the rest.
+
+    Only summary["deleted_bytes"] (bytes actually removed) and
+    summary["skipped"] are updated; the caller decides how to count
+    this folder itself. Symlinks/junctions inside are left untouched.
+
+    Returns True if `path` itself was removed (i.e. everything inside it
+    could be removed), False if something had to be left behind.
+    """
+    try:
+        entries = list(os.scandir(path))
+    except OSError:
+        summary["skipped"].append(path)
+        return False
+
+    all_gone = True
+    for entry in entries:
+        full = entry.path
+
+        if _is_link_or_reparse_point(entry):
+            summary["skipped"].append(full)
+            all_gone = False
+            continue
+
+        try:
+            is_dir = entry.is_dir(follow_symlinks=False)
+        except OSError:
+            summary["skipped"].append(full)
+            all_gone = False
+            continue
+
+        if is_dir:
+            if not _remove_tree_best_effort(full, summary):
+                all_gone = False
+            continue
+
+        try:
+            size = entry.stat(follow_symlinks=False).st_size
+        except OSError:
+            size = 0
+        try:
+            os.remove(full)
+        except OSError:
+            # In use / permission denied: skip just this file, keep going.
+            summary["skipped"].append(full)
+            all_gone = False
+            continue
+        summary["deleted_bytes"] += size
+
+    if not all_gone:
+        return False
+    try:
+        os.rmdir(path)
+    except OSError:
+        summary["skipped"].append(path)
+        return False
+    return True
+
+
 def delete_dir_contents(path: str, log=None, file_filter=None) -> dict:
     """Delete everything INSIDE `path`, but keep `path` itself.
 
@@ -97,7 +180,14 @@ def delete_dir_contents(path: str, log=None, file_filter=None) -> dict:
     Symlinks (both file-symlinks and dir-symlinks) are always skipped —
     deleting a symlink target could break other applications that depend
     on it, so we never touch them even when they appear inside a temp
-    folder.
+    folder (this applies to symlinks/junctions nested inside
+    subfolders too).
+
+    A locked file inside a subfolder only skips THAT file: everything
+    else in the subfolder is still deleted, and deleted_bytes counts
+    exactly the bytes that were really removed (see
+    _remove_tree_best_effort). deleted_dirs counts top-level
+    subfolders that were removed completely.
 
     Returns a summary dict: {"deleted_bytes", "deleted_files",
     "deleted_dirs", "skipped": [list of paths that could not be removed]}.
@@ -137,10 +227,8 @@ def delete_dir_contents(path: str, log=None, file_filter=None) -> dict:
                 # that match it, so skip subdirectories entirely.
                 if file_filter is not None:
                     continue
-                size_before = get_dir_size(full)
-                shutil.rmtree(full)
-                summary["deleted_bytes"] += size_before
-                summary["deleted_dirs"] += 1
+                if _remove_tree_best_effort(full, summary):
+                    summary["deleted_dirs"] += 1
             else:
                 # Apply the per-filename filter if one was provided.
                 if file_filter is not None and not file_filter(entry.name):

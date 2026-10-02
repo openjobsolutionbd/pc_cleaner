@@ -179,6 +179,69 @@ class TestDeleteDirContents(unittest.TestCase):
         self.assertEqual(summary["deleted_files"], 1)
         self.assertEqual(summary["deleted_bytes"], 4)
 
+    def test_locked_file_in_subfolder_does_not_stop_the_rest(self):
+        # Regression: shutil.rmtree() aborted the whole subfolder at the
+        # first locked file, leaving every file it hadn't reached yet
+        # behind, and reported 0 bytes freed for the bytes it HAD removed.
+        names = [f"f{i:02d}.bin" for i in range(10)]
+        for n in names:
+            self._make_file("Cache_Data", n, content=b"x" * 1000)
+        locked_file = os.path.join(self.tmp, "Cache_Data", "f03.bin")
+
+        real_remove = os.remove
+        real_unlink = os.unlink
+
+        # Match on the bare file name and patch both os.remove and
+        # os.unlink, so this simulates "file in use" no matter which
+        # deletion call (or relative/dir_fd-style path) is used.
+        def fake_remove(path, *a, **kw):
+            if os.path.basename(str(path)) == "f03.bin":
+                raise PermissionError("simulated: file in use")
+            return real_remove(path, *a, **kw)
+
+        def fake_unlink(path, *a, **kw):
+            if os.path.basename(str(path)) == "f03.bin":
+                raise PermissionError("simulated: file in use")
+            return real_unlink(path, *a, **kw)
+
+        with unittest.mock.patch("cleaner_core.os.remove", side_effect=fake_remove), \
+             unittest.mock.patch("cleaner_core.os.unlink", side_effect=fake_unlink):
+            summary = core.delete_dir_contents(self.tmp)
+
+        self.assertEqual(os.listdir(os.path.join(self.tmp, "Cache_Data")), ["f03.bin"])
+        self.assertEqual(summary["deleted_bytes"], 9000)
+        self.assertIn(locked_file, summary["skipped"])
+        self.assertEqual(summary["deleted_dirs"], 0, "folder still holds the locked file")
+        self.assertTrue(os.path.isdir(self.tmp))
+
+    def test_nested_tree_is_removed_and_counted_exactly(self):
+        self._make_file("a", "b", "deep.txt", content=b"1" * 40)
+        self._make_file("a", "top.txt", content=b"2" * 60)
+        summary = core.delete_dir_contents(self.tmp)
+        self.assertEqual(os.listdir(self.tmp), [])
+        self.assertEqual(summary["deleted_bytes"], 100)
+        self.assertEqual(summary["deleted_dirs"], 1)
+        self.assertEqual(summary["skipped"], [])
+
+    def test_symlink_inside_subfolder_is_never_followed_or_deleted(self):
+        outside = tempfile.mkdtemp()
+        try:
+            precious = os.path.join(outside, "precious.txt")
+            with open(precious, "wb") as f:
+                f.write(b"keep me")
+            self._make_file("sub", "junk.txt", content=b"junk")
+            link = os.path.join(self.tmp, "sub", "link_to_outside")
+            try:
+                os.symlink(outside, link, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks not supported on this platform/OS")
+            core.delete_dir_contents(self.tmp)
+            self.assertTrue(os.path.exists(precious), "symlink target must never be touched")
+            self.assertTrue(os.path.islink(link), "nested symlink must not be removed")
+            self.assertFalse(os.path.exists(os.path.join(self.tmp, "sub", "junk.txt")))
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
     def test_file_filter_skips_subdirectories(self):
         # When a filter is active, subdirectories are left untouched —
         # the filter is per-filename and directories have no single name
