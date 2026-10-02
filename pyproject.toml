@@ -37,11 +37,6 @@ ignore = [
 # Test files intentionally do things Ruff would otherwise flag, e.g.
 # unittest.mock.patch() targets that look like unused imports.
 "test_*.py" = ["F401"]
-# shutdown_clean.py must add its own directory to sys.path *before*
-# importing its sibling modules (it can be launched by Group Policy with
-# CWD set to System32 - see the module's own "Bootstrap" comment), so
-# these imports cannot be moved above that sys.path fix.
-"shutdown_clean.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.10"

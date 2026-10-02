@@ -1,6 +1,6 @@
 # PC Cleaner — সেটআপ ও ব্যবহার নির্দেশিকা
 
-**বর্তমান ভার্সন: v1.4.5**
+**বর্তমান ভার্সন: v1.5.0**
 
 ## এই অ্যাপটা কী করে
 
@@ -50,12 +50,16 @@ python --version
 |---|---|
 | **Quick Clean** | রোজকার ব্যবহারের জন্য — একটাই "Clean Now" বাটন, কোনো checkbox বা choice নেই। শুধু "নিরাপদ" ব্যাজের ক্যাটাগরিগুলো (Temp, Cache, Recycle Bin ইত্যাদি) পরিষ্কার করে। |
 | **Junk Cleanup** | Temp files, Browser Cache, Thumbnail Cache, Error Reports, Windows Update পুরনো ফাইল, Delivery Optimization, Crash Dumps, Recycle Bin, Prefetch (ঐচ্ছিক) — চেকবক্স দিয়ে বেছে "Clean Selected"। ক্লিন শেষে একটা পপ-আপে দেখাবে ঠিক কত জায়গা খালি হলো, এবং সিস্টেম ড্রাইভের Before/After ফ্রি স্পেসও তুলনা করে দেখাবে। |
-| **Browser & Network** | শুধু Browsing History মোছে (Cookies/Password কখনো না), DNS Cache Flush, আর Chrome Profile Manager (একসাথে অনেক প্রোফাইল নিরাপদে খোলা — CPU/RAM বেশি ব্যস্ত থাকলে অপেক্ষা করে; অথবা এক ক্লিকে সব Chrome বন্ধ করে PC শাটডাউন) |
-| **Startup && Shutdown** | বুটে কোন প্রোগ্রাম চালু হয় তা দেখা ও বন্ধ/চালু করা (রিভার্সিবল), এবং **Shutdown Auto-Clean** — প্রতিবার PC শাটডাউন করার সময় স্বয়ংক্রিয়ভাবে Temp/Cache/Recycle Bin পরিষ্কার হয়ে যায় (Enable/Disable/Run Now বাটন)। |
+| **Browser & Network** | শুধু Browsing History মোছে (Cookies/Password কখনো না), DNS Cache Flush |
+| **Startup Manager** | বুটে কোন প্রোগ্রাম চালু হয় তা দেখা ও বন্ধ/চালু করা (রিভার্সিবল)। |
 
 উইন্ডো খোলার সাথে সাথেই উপরের ডানদিকে সিস্টেম ড্রাইভের ফ্রি স্পেস একনজরে দেখা যায়।
 
 ব্রাউজার হিস্ট্রি মোছার আগে Chrome/Edge বন্ধ থাকতে হবে (অ্যাপ নিজেই চেক করে জানিয়ে দেবে)।
+
+**v1.5.0 — ব্যবহারকারীর অনুরোধে ফিচার সরানো হয়েছে:** **Chrome Profile Manager** এবং **Shutdown Auto-Clean** সম্পূর্ণ মুছে ফেলা হয়েছে — সংশ্লিষ্ট ফাইল (`chrome_profile_manager.py`, `shutdown_setup.py`, `shutdown_clean.py`) ও তাদের টেস্টসহ। **Startup Manager** রাখা হয়েছে (আগের "Startup && Shutdown" ট্যাবের নাম এখন শুধু "Startup Manager")। নিচের পুরনো ভার্সনের নোটে সরানো ফিচারগুলোর উল্লেখ শুধু ইতিহাস হিসেবে রাখা আছে।
+
+**আগে Shutdown Clean চালু করে থাকলে:** নতুন ভার্সনে আর অ্যাপ থেকে এটা বন্ধ করার বাটন নেই, তাই আপডেটের **আগে** পুরনো ভার্সনের "Disable Shutdown Clean" বাটন চেপে বন্ধ করে নিন। আগেই আপডেট করে ফেললে ম্যানুয়ালি সরাতে হবে (Group Policy Editor-এর Shutdown স্ক্রিপ্ট, বা Task Scheduler-এর `PC_Cleaner_ShutdownClean` টাস্ক)। Fast Startup আগে অ্যাপ বন্ধ করেছিল — সেটা চাইলে Windows Power Options থেকে নিজে আবার চালু করা যায়।
 
 **v1.4.4 — বাগ ফিক্স (গুরুত্বপূর্ণ):** সম্পূর্ণ কোড রিভিউ করে ৩টা আসল বাগ খুঁজে ঠিক করা হয়েছে:
 - **Browsing History clear** — Chrome/Edge ঠিকমতো বন্ধ না হলে (ক্র্যাশ বা force-kill-এর পর) একটা leftover ফাইল থেকে যেত যেটার কারণে "মোছা" হিস্ট্রি আবার ফিরে আসতে পারত ব্রাউজার পরের বার খোলার সময়। এখন এই leftover ফাইল ঠিকমতো পরিষ্কার হয়, তাই ক্লিয়ার করা হিস্ট্রি সত্যিই ক্লিয়ার থাকে।
@@ -68,15 +72,13 @@ python --version
 
 **v1.4.1:** Junk Cleanup-এর "Chrome Browser Cache" ক্যাটাগরি (আগে থেকেই আছে, নতুন কোনো বাটন নেই) এখন সব Chrome প্রোফাইল জুড়ে এবং Cache-এর পাশাপাশি Code Cache/GPUCache/Service Worker cache-ও পরিষ্কার করে — এগুলোই মূলত সময়ের সাথে জমে ব্রাউজার ধীর করে দেয়। Quick Clean-ও স্বয়ংক্রিয়ভাবে এই সুবিধা পায়।
 
-**Chrome Profile Manager নোট:** আগে আলাদা থাকা "Chrome opener" স্ক্রিপ্ট দুটো (Smart Chrome Profile Opener + Shout Down) এখন এই অ্যাপের ভেতরেই — আলাদা করে psutil ইনস্টল করার দরকার নেই, CPU/RAM সরাসরি Windows API থেকে পড়া হয় (এই প্রজেক্টের বাকি সব কিছুর মতোই কোনো থার্ড-পার্টি ডিপেন্ডেন্সি ছাড়া)। "Chrome বন্ধ করে PC শাটডাউন করুন" বাটনটা তাৎক্ষণিক ও আয়রিভার্সিবল — ক্লিক করলে একটা কনফার্মেশন পপ-আপ দেখাবে।
-
-**v1.4.0-এ যা সরানো হয়েছে:** ব্যবহারকারীর অনুরোধে **System Tools** ট্যাব (Disk Space Analyzer, Empty Folder Finder, Icon Cache Reset) আর **Automation & History** ট্যাবের বেশিরভাগ অংশ (সাপ্তাহিক/দৈনিক শিডিউল, Error Log ভিউয়ার, Cleanup History ভিউয়ার) সরিয়ে ফেলা হয়েছে — শুধু **Shutdown Auto-Clean** রাখা হয়েছে, যেটা এখন Startup && Shutdown ট্যাবে আছে। এরর এখনো `error_log.json`-এ লগ হয় (শুধু দেখার UI নেই), আর প্রতিটা ক্লিনআপ এখনো history-তে লগ হয় (শুধু দেখার UI নেই) — চাইলে পরে আবার UI যোগ করা যাবে। `system_tools.py` মডিউল (আর তার টেস্ট) প্রজেক্টেই থেকে গেছে, শুধু GUI থেকে ডিসকানেক্ট করা হয়েছে — ভবিষ্যতে চাইলে সহজে আবার ফিরিয়ে আনা যাবে। `scheduler.py` (আর তার টেস্ট) পরে সম্পূর্ণ মুছে ফেলা হয়েছে — pc_cleaner.py কখনো এটা ইমপোর্ট করত না, এবং GUI-তে ফিরিয়ে আনার কোনো পরিকল্পনা নেই।
+**v1.4.0-এ যা সরানো হয়েছে:** ব্যবহারকারীর অনুরোধে **System Tools** ট্যাব (Disk Space Analyzer, Empty Folder Finder, Icon Cache Reset) আর **Automation & History** ট্যাবের বেশিরভাগ অংশ (সাপ্তাহিক/দৈনিক শিডিউল, Error Log ভিউয়ার, Cleanup History ভিউয়ার) সরিয়ে ফেলা হয়েছে — শুধু **Shutdown Auto-Clean** রাখা হয়েছে, যেটা পরে (v1.5.0-এ) সেটাও সরানো হয়েছে। এরর এখনো `error_log.json`-এ লগ হয় (শুধু দেখার UI নেই), আর প্রতিটা ক্লিনআপ এখনো history-তে লগ হয় (শুধু দেখার UI নেই) — চাইলে পরে আবার UI যোগ করা যাবে। `system_tools.py` মডিউল (আর তার টেস্ট) প্রজেক্টেই থেকে গেছে, শুধু GUI থেকে ডিসকানেক্ট করা হয়েছে — ভবিষ্যতে চাইলে সহজে আবার ফিরিয়ে আনা যাবে। `scheduler.py` (আর তার টেস্ট) পরে সম্পূর্ণ মুছে ফেলা হয়েছে — pc_cleaner.py কখনো এটা ইমপোর্ট করত না, এবং GUI-তে ফিরিয়ে আনার কোনো পরিকল্পনা নেই।
 
 ---
 
 ## Automated Test চালানো (ঐচ্ছিক, কিন্তু সুপারিশকৃত)
 
-কোড ঠিকমতো কাজ করছে কিনা যাচাই করতে `run_tests.bat`-এ ডাবল-ক্লিক করুন। এতে ১৯৯টা স্বয়ংক্রিয় টেস্ট চলবে (GUI ইন্টিগ্রেশন টেস্টসহ) — বিশেষ করে "Cookies কখনো মোছা হয় না" আর "root ফোল্ডার কখনো ডিলিট হয় না" — এই নিরাপত্তা নিশ্চয়তাগুলো প্রতিবার কোড বদলালে আবার যাচাই হয়।
+কোড ঠিকমতো কাজ করছে কিনা যাচাই করতে `run_tests.bat`-এ ডাবল-ক্লিক করুন। এতে ১৪০টা স্বয়ংক্রিয় টেস্ট চলবে (GUI ইন্টিগ্রেশন টেস্টসহ) — বিশেষ করে "Cookies কখনো মোছা হয় না" আর "root ফোল্ডার কখনো ডিলিট হয় না" — এই নিরাপত্তা নিশ্চয়তাগুলো প্রতিবার কোড বদলালে আবার যাচাই হয়।
 
 কোড-কোয়ালিটি চেক (ঐচ্ছিক, ডেভেলপমেন্টের জন্য): `lint.bat`-এ ডাবল-ক্লিক করলে Ruff (bug-finder) আর mypy (type-checker) চলবে — এগুলো অ্যাপে বান্ডেল হয় না, শুধু কোড লেখার সময় ভুল ধরিয়ে দেয়।
 
@@ -85,7 +87,7 @@ python --version
 ## ফাইল লিস্ট
 
 - `pc_cleaner.py` — মূল অ্যাপ (GUI)
-- `cleaner_core.py`, `browser_core.py`, `chrome_profile_manager.py`, `system_tools.py`, `startup_manager.py`, `history_log.py` — ভেতরের লজিক (আলাদা ফাইলে, যাতে টেস্ট করা যায়)
+- `cleaner_core.py`, `browser_core.py`, `system_tools.py`, `startup_manager.py`, `history_log.py` — ভেতরের লজিক (আলাদা ফাইলে, যাতে টেস্ট করা যায়)
 - `test_*.py` — automated tests
 - `build_exe.bat` — .exe বানানোর স্ক্রিপ্ট
 - `run_tests.bat` — টেস্ট চালানোর স্ক্রিপ্ট

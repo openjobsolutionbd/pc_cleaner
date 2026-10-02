@@ -9,7 +9,7 @@ Why this exists
 Instead of an unexpected bug crashing the app, or silently breaking one
 piece of a cleanup run with no trace, every risky spot is wrapped (see
 _run_safely() and the report_callback_exception hook in pc_cleaner.py,
-and the per-category try/except in shutdown_clean.py) so that ANY
+and the per-category try/except in run_auto_clean) so that ANY
 unexpected exception is caught, written here with full context, and
 the app keeps running.
 

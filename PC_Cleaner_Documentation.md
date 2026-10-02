@@ -2,8 +2,8 @@
 
 **সম্পূর্ণ প্রজেক্ট ডকুমেন্টেশন**
 
-ভার্সন: **v1.4.5**
-সর্বশেষ হালনাগাদ: আগস্ট ২০২৬
+ভার্সন: **v1.5.0**
+সর্বশেষ হালনাগাদ: অক্টোবর ২০২৬
 
 Windows-এর জন্য একটা জাঙ্ক ক্লিনআপ + সিস্টেম মেইনটেন্যান্স অ্যাপ্লিকেশন। এই ডকুমেন্টে অ্যাপটা কী করে, কীভাবে চালাতে হয়, কীভাবে বিল্ড করতে হয়, নিরাপত্তা গ্যারান্টি কী, এবং প্রজেক্টের ফাইল কাঠামো — সবকিছু এক জায়গায় বিস্তারিতভাবে বলা আছে।
 
@@ -35,12 +35,16 @@ PC Cleaner একটা Windows ডেস্কটপ অ্যাপ্লি�
 |---|---|
 | **Quick Clean** | রোজকার ব্যবহারের জন্য সবচেয়ে সহজ ট্যাব — একটাই "Clean Now" বাটন, কোনো চেকবক্স বা ক্যাটাগরি বাছাই নেই। শুধু "নিরাপদ" ব্যাজের ক্যাটাগরি (Temp, Cache, Recycle Bin ইত্যাদি) পরিষ্কার হয়; Windows Update Old Files, Crash Dumps, Prefetch-এর মতো সতর্কতার ক্যাটাগরি এখানে কখনো ছোঁয়া হয় না। সর্বশেষ কবে ক্লিন করা হয়েছিল তা ট্যাবেই দেখা যায়। |
 | **Junk Cleanup** | Temp files, Browser Cache, Thumbnail Cache, Error Reports, Windows Update পুরনো ফাইল, Delivery Optimization, Crash Dumps, Recycle Bin, Prefetch — চেকবক্স দিয়ে বেছে "Clean Selected" চাপলেই ক্লিন হবে। প্রতিটার পাশে নিরাপত্তা ব্যাজ দেখা যায়। ক্লিন শেষে কত জায়গা খালি হলো এবং Before/After ফ্রি স্পেস তুলনা দেখায়। |
-| **Browser & Network** | শুধু Browsing History মোছে (Cookies/Password কখনো না), DNS Cache Flush করে, আর Chrome Profile Manager দিয়ে একসাথে অনেক Chrome প্রোফাইল নিরাপদে খোলে অথবা সব Chrome বন্ধ করে PC শাটডাউন করে। |
-| **Startup && Shutdown** | বুটে কোন প্রোগ্রাম চালু হয় তা দেখা এবং বন্ধ/চালু করা — সম্পূর্ণ reversible। সাথে **Shutdown Auto-Clean** — Enable করলে প্রতিবার PC শাটডাউন করার সময় Temp/Cache/Recycle Bin স্বয়ংক্রিয়ভাবে পরিষ্কার হয় (Enable/Disable/Run Now বাটন)। |
+| **Browser & Network** | শুধু Browsing History মোছে (Cookies/Password কখনো না), DNS Cache Flush করে। |
+| **Startup Manager** | বুটে কোন প্রোগ্রাম চালু হয় তা দেখা এবং বন্ধ/চালু করা — সম্পূর্ণ reversible। |
 
 উইন্ডো খোলার সাথে সাথেই উপরের ডানদিকে সিস্টেম ড্রাইভের ফ্রি স্পেস একনজরে দেখা যায়। ব্রাউজার হিস্ট্রি মোছার আগে Chrome/Edge বন্ধ থাকতে হবে — অ্যাপ নিজেই চেক করে জানিয়ে দেবে।
 
-**v1.4.0-এ সরানো হয়েছে:** System Tools ট্যাব (Disk Space Analyzer, Empty Folder Finder, Icon Cache Reset) এবং Automation & History ট্যাবের বেশিরভাগ (Scheduled Auto-Clean, Error Log ভিউয়ার, Cleanup History ভিউয়ার) ব্যবহারকারীর অনুরোধে সরানো হয়েছে — শুধু Shutdown Auto-Clean রাখা হয়েছে, উপরের টেবিলে যেটা এখন Startup && Shutdown ট্যাবে। এরর এখনো `error_log.json`-এ আর ক্লিনআপ এখনো history-তে লগ হয়, শুধু GUI-তে দেখার উপায় নেই — চাইলে পরে ফিরিয়ে আনা যাবে।
+**v1.4.0-এ সরানো হয়েছে:** System Tools ট্যাব (Disk Space Analyzer, Empty Folder Finder, Icon Cache Reset) এবং Automation & History ট্যাবের বেশিরভাগ (Scheduled Auto-Clean, Error Log ভিউয়ার, Cleanup History ভিউয়ার) ব্যবহারকারীর অনুরোধে সরানো হয়েছে — শুধু Shutdown Auto-Clean রাখা হয়েছে, যেটা পরে (v1.5.0-এ) সেটাও সরানো হয়েছে। এরর এখনো `error_log.json`-এ আর ক্লিনআপ এখনো history-তে লগ হয়, শুধু GUI-তে দেখার উপায় নেই — চাইলে পরে ফিরিয়ে আনা যাবে।
+
+**v1.5.0-এ সরানো হয়েছে:** ব্যবহারকারীর অনুরোধে **Chrome Profile Manager** এবং **Shutdown Auto-Clean** সম্পূর্ণ মুছে ফেলা হয়েছে — সংশ্লিষ্ট ফাইল (`chrome_profile_manager.py`, `shutdown_setup.py`, `shutdown_clean.py`) ও তাদের টেস্টসহ। **Startup Manager** রাখা হয়েছে; ট্যাবের নাম "Startup && Shutdown" থেকে বদলে শুধু "Startup Manager" হয়েছে।
+
+**আগে Shutdown Clean চালু করে থাকলে:** নতুন ভার্সনে আর অ্যাপ থেকে এটা বন্ধ করার বাটন নেই, তাই আপডেটের **আগে** পুরনো ভার্সনের "Disable Shutdown Clean" বাটন চেপে বন্ধ করে নিন। আগেই আপডেট করে ফেললে ম্যানুয়ালি সরাতে হবে (Group Policy Editor-এর Shutdown স্ক্রিপ্ট, বা Task Scheduler-এর `PC_Cleaner_ShutdownClean` টাস্ক)। Fast Startup আগে অ্যাপ বন্ধ করেছিল — সেটা চাইলে Windows Power Options থেকে নিজে আবার চালু করা যায়।
 
 ---
 
@@ -93,12 +97,11 @@ python --version
 | `pc_cleaner.py` | মূল অ্যাপ — GUI, থিম, ৪টা ট্যাব একসাথে জোড়া লাগায় |
 | `cleaner_core.py` | Junk file ক্লিনআপের মূল লজিক ও ক্যাটাগরি লিস্ট |
 | `browser_core.py` | ব্রাউজার হিস্ট্রি ও ক্যাশ ক্লিনআপ (Cookies কখনো ছোঁয় না) |
-| `chrome_profile_manager.py` | Chrome Profile Manager — CPU/RAM-থ্রটলড multi-profile opener, ও Chrome বন্ধ করে PC শাটডাউন |
 | `system_tools.py` | Disk analyzer, empty folder finder, icon cache, drive helper, root-protection guard — GUI ট্যাব সরানো হয়েছে, মডিউল রয়ে গেছে |
-| `startup_manager.py` | স্টার্টআপ প্রোগ্রাম চালু/বন্ধ করার রিভার্সিবল লজিক (Startup && Shutdown ট্যাবে) |
+| `startup_manager.py` | স্টার্টআপ প্রোগ্রাম চালু/বন্ধ করার রিভার্সিবল লজিক (Startup Manager ট্যাবে) |
 | `history_log.py` | ক্লিনআপের ইতিহাস লগ রাখা (এখনো লেখা হয়, দেখার UI নেই) |
 | `error_log.py` | এরর লগ রাখা (এখনো লেখা হয়, দেখার UI নেই) |
-| `test_*.py` | প্রতিটা মডিউলের জন্য স্বয়ংক্রিয় টেস্ট (১৯৯টা, GUI-সহ) |
+| `test_*.py` | প্রতিটা মডিউলের জন্য স্বয়ংক্রিয় টেস্ট (১৪০টা, GUI-সহ) |
 | `Start_Here.bat` | ডাবল-ক্লিক করে সরাসরি অ্যাপ চালানোর লঞ্চার |
 | `build_exe.bat` | Python সোর্স থেকে `PCCleaner.exe` বানানোর স্ক্রিপ্ট (`--onedir`) |
 | `run_tests.bat` | সব স্বয়ংক্রিয় টেস্ট চালানোর স্ক্রিপ্ট |
@@ -108,14 +111,14 @@ python --version
 
 ## ৭. স্বয়ংক্রিয় টেস্ট
 
-কোড ঠিকমতো কাজ করছে কিনা নিশ্চিত হতে **`run_tests.bat`**-এ ডাবল-ক্লিক করলেই ১৯৯টা স্বয়ংক্রিয় টেস্ট চলবে (পুরো GUI ইন্টিগ্রেশন টেস্টসহ)। এর মধ্যে বিশেষভাবে গুরুত্বপূর্ণ কিছু টেস্ট আছে যেগুলো প্রতিবার কোড বদলালে নিশ্চিত করে যে হার্ড নিরাপত্তা গ্যারান্টিগুলো এখনো ঠিক আছে:
+কোড ঠিকমতো কাজ করছে কিনা নিশ্চিত হতে **`run_tests.bat`**-এ ডাবল-ক্লিক করলেই ১৪০টা স্বয়ংক্রিয় টেস্ট চলবে (পুরো GUI ইন্টিগ্রেশন টেস্টসহ)। এর মধ্যে বিশেষভাবে গুরুত্বপূর্ণ কিছু টেস্ট আছে যেগুলো প্রতিবার কোড বদলালে নিশ্চিত করে যে হার্ড নিরাপত্তা গ্যারান্টিগুলো এখনো ঠিক আছে:
 
 - Cookies কখনো মোছা হচ্ছে না কিনা
 - Password ফাইল কখনো ছোঁয়া হচ্ছে না কিনা
 - Root ফোল্ডার বা critical সিস্টেম ফোল্ডার (Windows, Users, Documents ইত্যাদি) কখনো ডিলিট হচ্ছে না কিনা — দুইবার যাচাই করে
 - Startup Manager-এর disable সবসময় undo করা যাচ্ছে কিনা
 - কোনো ফাইলে network লাইব্রেরি (socket, urllib, requests ইত্যাদি) ইম্পোর্ট করা হয়ে গেছে কিনা — অ্যাপ যেন সবসময় সম্পূর্ণ অফলাইন থাকে
-- অ্যাপে ঠিক ৪টা ট্যাব আছে কিনা, আর Shutdown Auto-Clean ঠিকমতো কাজ করছে কিনা (ব্যাকগ্রাউন্ড থ্রেডে চলে, history-তে লগ হয়, error হলে ক্র্যাশ না করে)
+- অ্যাপে ঠিক ৪টা ট্যাব আছে কিনা (Startup Manager সহ), আর সরানো উইজেট (Shutdown Clean, Chrome Profile Manager) আর নেই কিনা
 
 ---
 
@@ -134,6 +137,8 @@ python --version
 ---
 
 ## ১০. ভার্সন হিস্ট্রি
+
+**v1.5.0** — ব্যবহারকারীর অনুরোধে ফিচার সরানো: **Chrome Profile Manager** ও **Shutdown Auto-Clean** সম্পূর্ণ মুছে ফেলা হয়েছে — `chrome_profile_manager.py`, `shutdown_setup.py`, `shutdown_clean.py` ও তিনটা টেস্ট ফাইলসহ (`test_chrome_profile_manager.py`, `test_shutdown_setup.py` আর আগের কাজের অংশ হিসেবে GUI ইন্টিগ্রেশন টেস্টের Shutdown অংশ)। **Startup Manager** রাখা হয়েছে, শুধু ট্যাবের নাম "Startup Manager" হয়েছে। `pc_cleaner.py` থেকে সরানো ফিচারগুলোর UI, বাটন-হ্যান্ডলার ও ইমপোর্ট সরানো হয়েছে; `pyproject.toml` থেকে `shutdown_clean.py`-র জন্য E402 ignore সরানো হয়েছে (ফাইলটাই আর নেই)। এর সাথে আগের জানা flaky টেস্টটাও (`test_run_now_logs_to_history...`) গেছে, কারণ সেটা Shutdown Clean-এর অংশ ছিল। মোট টেস্ট ১৯৯ → ১৪০, তিনবার পরপর সম্পূর্ণ স্যুট চালিয়ে যাচাই করা হয়েছে; `ruff check .` ক্লিন। কোনো ক্লিনআপ লজিক (`cleaner_core.py`, `browser_core.py`) বা `startup_manager.py` বদলায়নি, তাই Password/Cookies/Root-folder/Startup-reversible/অফলাইন নিরাপত্তা গ্যারান্টি অপরিবর্তিত।
 
 **v1.4.5** — কোড রিভিউ + বাস্তবে টেস্ট/lint চালিয়ে ধরা পড়া কয়েকটা বাগ ঠিক করা হয়েছে। (১) `shutdown_setup.py`-তে `import winreg` আগে কোনো গার্ড ছাড়া top-level-এ ছিল — Windows ছাড়া অন্য কোনো মেশিনে (যেমন GitHub Actions CI) `pc_cleaner.py` ইমপোর্ট করলেই সাথে সাথে ক্র্যাশ করত, ফলে `test_integration_gui.py` কখনো রানই হতো না; এখন `startup_manager.py`-র প্যাটার্নেই ঐচ্ছিক ইমপোর্ট + `is_windows()` গার্ড। (২) Chrome Profile Manager শুধু window class name দিয়ে Chrome চিনত — কিন্তু Microsoft Edge-ও Chromium-based বলে ঠিক একই class name ব্যবহার করে, তাই "Chrome বন্ধ করে শাটডাউন" বাটনে Edge-এর সেভ-না-করা কাজও হারানোর ঝুঁকি ছিল; এখন প্রতিটা window-এর প্রকৃত owning process ID `tasklist`-এর মাধ্যমে chrome.exe-এর সাথে মিলিয়ে যাচাই করা হয়। (৩) "সব Chrome প্রোফাইল খুলুন" আর "Chrome বন্ধ করে শাটডাউন" বাটন দুটো কাজ চলাকালীন disable থাকত না (বাকি লম্বা-চলা বাটনগুলোর মতো), বারবার ট্যাপে ডাবল-রান হওয়ার ঝুঁকি ছিল — এখন ঠিক করা হয়েছে। `scheduler.py` (আর তার টেস্ট) — যেটা v1.4.0-এ GUI থেকে ডিসকানেক্ট করার পরও ভবিষ্যতের জন্য রাখা হয়েছিল — এখন সম্পূর্ণ মুছে ফেলা হয়েছে, যেহেতু আর ব্যবহারের পরিকল্পনা নেই। এছাড়া `ruff`-এর ৬০টা lint finding পর্যালোচনা করে ৪১টা (দুটো নির্দিষ্ট, বহুল-ব্যবহৃত কোডিং idiom) কারণসহ `pyproject.toml`-এ ignore করা হয়েছে আর বাকি ১৯টা সরাসরি কোডে ফিক্স হয়েছে — এখন `ruff check .` সত্যিকারভাবেই ক্লিন পাশ করে (CI-র lint স্টেপে `continue-on-error` লাগেনি)। একটা অব্যবহৃত `import logging`ও সরানো হয়েছে। মোট টেস্ট এখন ১৯৯টা, তিনবার পরপর সম্পূর্ণ স্যুট চালিয়ে যাচাই করা হয়েছে।
 

@@ -5,10 +5,8 @@ Main GUI application. Four tabs:
   0. Quick Clean         - one-button shortcut that cleans only the
                            "safe"-badge categories, for everyday use
   1. Junk Cleanup      - temp/cache/update-leftover files + Recycle Bin
-  2. Browser & Network  - browsing history (never cookies) + DNS flush +
-                           Chrome profile manager (open many, or close all & shut down)
-  3. Startup && Shutdown - enable/disable auto-start programs (reversibly) +
-                           Shutdown Auto-Clean (cleans on every PC shutdown)
+  2. Browser & Network  - browsing history (never cookies) + DNS flush
+  3. Startup Manager    - enable/disable auto-start programs (reversibly)
 
 Run with a GUI:      python pc_cleaner.py
 Run headless (used by a Task-Scheduler entry, if one exists): python pc_cleaner.py --auto-clean
@@ -25,15 +23,13 @@ from datetime import datetime
 
 import cleaner_core
 import browser_core
-import chrome_profile_manager
 import system_tools
 import startup_manager
 import history_log
-import shutdown_setup
 import error_log
 
 
-__version__ = "1.4.5"
+__version__ = "1.5.0"
 
 
 # ----------------------------------------------------------------------
@@ -413,7 +409,7 @@ class CleanerApp:
         notebook.add(self.tab_quick, text="Quick Clean")
         notebook.add(self.tab_junk, text="Junk Cleanup")
         notebook.add(self.tab_browser, text="Browser && Network")
-        notebook.add(self.tab_startup, text="Startup && Shutdown")
+        notebook.add(self.tab_startup, text="Startup Manager")
         notebook.pack(fill="both", expand=True, padx=10, pady=(4, 10))
 
         self._build_quick_tab()
@@ -853,27 +849,6 @@ class CleanerApp:
         ttk.Button(frame, text="Flush DNS Cache", command=self.flush_dns).pack(anchor="w", padx=10, pady=5)
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-        ttk.Label(frame, text="Chrome Profile Manager", style="Section.TLabel").pack(anchor="w", padx=10)
-        ttk.Label(
-            frame,
-            text="একসাথে অনেকগুলো Chrome প্রোফাইল নিরাপদে খোলে (CPU/RAM বেশি ব্যস্ত থাকলে প্রতিটার আগে অপেক্ষা করে, "
-                 "যাতে PC হ্যাং না করে), অথবা সব Chrome উইন্ডো বন্ধ করে PC শাটডাউন করে।",
-            style="Muted.TLabel", wraplength=760, justify="left",
-        ).pack(anchor="w", padx=10)
-        chrome_btn_frame = ttk.Frame(frame)
-        chrome_btn_frame.pack(anchor="w", padx=10, pady=5)
-        self.open_chrome_profiles_btn = ttk.Button(
-            chrome_btn_frame, text="সব Chrome প্রোফাইল খুলুন", style="Accent.TButton",
-            command=self.open_chrome_profiles,
-        )
-        self.open_chrome_profiles_btn.pack(side="left")
-        self.close_chrome_shutdown_btn = ttk.Button(
-            chrome_btn_frame, text="Chrome বন্ধ করে PC শাটডাউন করুন", style="Danger.TButton",
-            command=self.close_chrome_and_shutdown,
-        )
-        self.close_chrome_shutdown_btn.pack(side="left", padx=5)
-
-        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
         self.browser_log = LogBox(frame, height=8)
         self.browser_log.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -922,39 +897,9 @@ class CleanerApp:
         log = lambda m: self._ui(self.browser_log.log, m)
         threading.Thread(target=self._run_safely, args=(browser_core.flush_dns, log), daemon=True).start()
 
-    def open_chrome_profiles(self):
-        self.open_chrome_profiles_btn.config(state="disabled")
-        threading.Thread(target=self._run_safely, args=(self._open_chrome_profiles_worker,), daemon=True).start()
-
-    def _open_chrome_profiles_worker(self):
-        log = lambda m: self._ui(self.browser_log.log, m)
-        chrome_profile_manager.open_profiles(log=log)
-        self._ui(self._open_chrome_profiles_done)
-
-    def _open_chrome_profiles_done(self):
-        self.open_chrome_profiles_btn.config(state="normal")
-
-    def close_chrome_and_shutdown(self):
-        if not messagebox.askyesno(
-            "নিশ্চিত করুন",
-            "এটা এখনই সব Chrome উইন্ডো বন্ধ করে PC শাটডাউন করবে।\n\n"
-            "Chrome-এর ট্যাব/সেশন স্বাভাবিকভাবে সেভ হয়ে পরে ফিরে আসবে, কিন্তু অন্য কোনো "
-            "প্রোগ্রামে সেভ না করা কাজ থাকলে সেটা হারিয়ে যেতে পারে।\n\nচালিয়ে যাবেন?",
-        ):
-            return
-        self.close_chrome_shutdown_btn.config(state="disabled")
-        threading.Thread(target=self._run_safely, args=(self._close_chrome_and_shutdown_worker,), daemon=True).start()
-
-    def _close_chrome_and_shutdown_worker(self):
-        log = lambda m: self._ui(self.browser_log.log, m)
-        chrome_profile_manager.close_chrome_and_shutdown(log=log)
-        self._ui(self._close_chrome_and_shutdown_done)
-
-    def _close_chrome_and_shutdown_done(self):
-        self.close_chrome_shutdown_btn.config(state="normal")
 
     # ------------------------------------------------------------------
-    # Tab 3: Startup && Shutdown
+    # Tab 3: Startup Manager
     # ------------------------------------------------------------------
     def _build_startup_tab(self):
         frame = self.tab_startup
@@ -976,34 +921,6 @@ class CleanerApp:
         self.startup_log = LogBox(frame, height=4)
         self.startup_log.pack(fill="both", expand=False, padx=10, pady=(0, 10))
         self.startup_items = []
-
-        ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-        ttk.Label(frame, text="Shutdown Auto-Clean", style="Section.TLabel").pack(anchor="w", padx=10)
-        ttk.Label(
-            frame,
-            text="Automatically cleans temp files, cache, and thumbnails every time you shut down the PC.",
-            style="Muted.TLabel", wraplength=560, justify="left",
-        ).pack(anchor="w", padx=10)
-        ttk.Label(
-            frame,
-            text="• Cleans: Temp files, Windows Temp, browser cache, Thumbnail cache, Error reports, Recycle Bin\n"
-                 "• Fast Startup is disabled automatically so the clean always runs\n"
-                 "• Registering/removing this requires Administrator rights",
-            style="Muted.TLabel", justify="left",
-        ).pack(anchor="w", padx=20, pady=(4, 0))
-
-        sd_btn_row = ttk.Frame(frame)
-        sd_btn_row.pack(anchor="w", padx=10, pady=6)
-        ttk.Button(sd_btn_row, text="Enable Shutdown Clean", style="Accent.TButton", command=self.enable_shutdown_clean).pack(side="left")
-        ttk.Button(sd_btn_row, text="Disable Shutdown Clean", command=self.disable_shutdown_clean).pack(side="left", padx=6)
-        ttk.Button(sd_btn_row, text="Run Now (Test)", command=self.run_shutdown_clean_now).pack(side="left")
-
-        self.shutdown_status_label = ttk.Label(frame, text="")
-        self.shutdown_status_label.pack(anchor="w", padx=10)
-        self._refresh_shutdown_status()
-
-        self.shutdown_log = LogBox(frame, height=4)
-        self.shutdown_log.pack(fill="both", expand=False, padx=10, pady=(4, 10))
 
     def refresh_startup_items(self):
         threading.Thread(target=self._run_safely, args=(self._refresh_startup_worker,), daemon=True).start()
@@ -1052,108 +969,18 @@ class CleanerApp:
             log(f"{item['name']}: {'enabled' if ok else 'failed'}")
         self._ui(self.refresh_startup_items)
 
-    # ------------------------------------------------------------------
-    # Shutdown Clean handlers (UI built as part of Tab 3 above)
-    # ------------------------------------------------------------------
-    def _refresh_shutdown_status(self):
-        try:
-            status = shutdown_setup.get_status()
-            gpo = status.get("gpo_registered", False)
-            task = status.get("task_registered", False)
-            fast_ok = status.get("fast_startup_disabled", False)
-
-            if gpo:
-                method = "Group Policy Shutdown Script"
-            elif task:
-                method = "Task Scheduler (Event 1074)"
-            else:
-                method = None
-
-            if method:
-                fs_note = " | Fast Startup: OFF ✓" if fast_ok else " | ⚠ Fast Startup still ON"
-                self.shutdown_status_label.config(
-                    text=f"✅  Shutdown Clean ENABLED — method: {method}{fs_note}",
-                    foreground=Theme.SUCCESS,
-                )
-            else:
-                self.shutdown_status_label.config(
-                    text="⭕  Shutdown Clean is NOT set up.",
-                    foreground=Theme.TEXT_MUTED,
-                )
-        except Exception:
-            self.shutdown_status_label.config(text="Status unknown.", foreground=Theme.TEXT_MUTED)
-
-    def enable_shutdown_clean(self):
-        if not cleaner_core.is_admin():
-            if messagebox.askyesno(
-                "Admin Rights Required",
-                "Enabling Shutdown Clean requires Administrator rights.\n\n"
-                "Restart this app as Administrator now?"
-            ):
-                self.restart_as_admin()
-            return
-        threading.Thread(target=self._run_safely, args=(self._enable_shutdown_worker,), daemon=True).start()
-
-    def _enable_shutdown_worker(self):
-        log = lambda m: self._ui(self.shutdown_log.log, m)
-        ok = shutdown_setup.setup_shutdown_clean(log)
-        if ok:
-            fast_startup_disabled = shutdown_setup.get_status().get("fast_startup_disabled", False)
-            if fast_startup_disabled:
-                log("✅ Done. The cleaner will now run silently on every shutdown.")
-            else:
-                log("✅ Registered — but see the Fast Startup warning above before relying on this.")
-        else:
-            log("❌ Setup failed. Check the log above.")
-        self._ui(self._refresh_shutdown_status)
-
-    def disable_shutdown_clean(self):
-        threading.Thread(target=self._run_safely, args=(self._disable_shutdown_worker,), daemon=True).start()
-
-    def _disable_shutdown_worker(self):
-        log = lambda m: self._ui(self.shutdown_log.log, m)
-        shutdown_setup.remove_shutdown_clean(log)
-        log("Shutdown Clean removed.")
-        self._ui(self._refresh_shutdown_status)
-
-    def run_shutdown_clean_now(self):
-        """Test run — executes the shutdown clean immediately in a background thread."""
-        log = lambda m: self._ui(self.shutdown_log.log, m)
-        log("Running shutdown clean now (test)...")
-        threading.Thread(target=self._run_safely, args=(self._run_shutdown_clean_worker,), daemon=True).start()
-
-    def _run_shutdown_clean_worker(self):
-        log = lambda m: self._ui(self.shutdown_log.log, m)
-        try:
-            import shutdown_clean
-            # Use a simple lambda logger so output goes to GUI
-            class _GuiLogger:
-                def info(self, m): log(m)
-                def warning(self, m): log(f"⚠ {m}")
-                def error(self, m): log(f"❌ {m}")
-                def critical(self, m): log(f"🔴 {m}")
-                handlers = []
-            result = shutdown_clean.run_shutdown_clean(_GuiLogger())
-            history_log.log_cleanup(result)
-            freed = cleaner_core.format_size(result.get("bytes_freed", 0))
-            log(f"✅ Test run done — freed {freed}")
-        except Exception as exc:
-            log(f"❌ Error: {exc}")
-            error_log.record("run_shutdown_clean_now", exc)
-
 
 # ---------------------------------------------------------------------------
 # Headless auto-clean, used by the scheduled task (no window, no prompts)
 # ---------------------------------------------------------------------------
 
 def run_auto_clean():
-    """Legacy CLI entry point (python pc_cleaner.py --auto-clean).
-    The newer shutdown_clean.py (registered via the "Shutdown Auto-Clean"
-    section of the Startup && Shutdown tab) is now the primary
-    automatic-cleaning path, but this is kept for anyone who scheduled
-    this flag directly (e.g. via their own Task Scheduler entry).
+    """Headless CLI entry point (python pc_cleaner.py --auto-clean) -
+    for anyone who schedules this flag themselves (e.g. via their own
+    Task Scheduler entry). There is no in-app scheduler or shutdown
+    auto-clean any more.
 
-    Hardened the same way as shutdown_clean.py: one category's failure
+    Hardened so one category's failure
     can't take down the rest of the run, and nothing here fails
     silently — this runs with no console attached (pythonw / Task
     Scheduler), so without logging to error_log, a bug here would be
