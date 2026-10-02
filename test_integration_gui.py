@@ -88,6 +88,31 @@ class TestCleanJunkWorkerIntegration(unittest.TestCase):
         self.assertEqual(self.app.category_sizes["test_fake"], 999)
 
 
+    def test_scan_worker_respects_the_categorys_file_filter(self):
+        # Regression: the scan used to count every file in the folder,
+        # so a filtered category (Thumbnail Cache) showed a size far
+        # larger than what cleaning actually frees.
+        target = os.path.join(self.tmp_dir, "filtered")
+        os.makedirs(target)
+        with open(os.path.join(target, "thumbcache_1.db"), "wb") as f:
+            f.write(b"x" * 100)
+        with open(os.path.join(target, "iconcache_1.db"), "wb") as f:
+            f.write(b"x" * 900)
+        category = {
+            "id": "test_filtered", "name": "Test Filtered", "desc": "test",
+            "paths": [target], "needs_admin": False, "default_checked": True,
+            "file_filter": lambda name: name.startswith("thumbcache_"),
+        }
+        self.app.categories = [category]
+        self.app.category_vars = {"test_filtered": tk.BooleanVar(value=True)}
+        self.app.category_size_labels["test_filtered"] = self.app.total_label
+
+        self.app._scan_junk_worker()
+        self._pump()
+
+        self.assertEqual(self.app.category_sizes["test_filtered"], 100)
+
+
 class TestQuickCleanWorkerIntegration(unittest.TestCase):
     """Quick Clean is meant to be a simpler, always-safe shortcut: it
     must only ever touch categories with badge == "safe", and must

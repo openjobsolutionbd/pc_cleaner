@@ -29,7 +29,7 @@ import history_log
 import error_log
 
 
-__version__ = "1.5.2"
+__version__ = "1.5.3"
 
 
 # ----------------------------------------------------------------------
@@ -660,7 +660,11 @@ class CleanerApp:
             if cat.get("special") == "recycle_bin":
                 size = cleaner_core.get_recycle_bin_size()
             else:
-                size = sum(cleaner_core.get_dir_size(p) for p in cat["paths"])
+                # Pass the category's file_filter so the scan counts only
+                # what cleaning would really delete (e.g. Thumbnail Cache
+                # removes thumbcache_* files, not the whole Explorer folder).
+                file_filter = cat.get("file_filter")
+                size = sum(cleaner_core.get_dir_size(p, file_filter=file_filter) for p in cat["paths"])
             self.category_sizes[cat["id"]] = size
             total += size
             self._ui(self._update_category_size, cat["id"], size)

@@ -37,10 +37,19 @@ def format_size(num_bytes: int) -> str:
     return f"{num_bytes:.1f} PB"
 
 
-def get_dir_size(path: str) -> int:
+def get_dir_size(path: str, file_filter=None) -> int:
     """Recursively sum the size of every file under `path`.
     Never raises: unreadable/locked files are simply skipped (counted as 0).
     Returns 0 if the path doesn't exist.
+
+    file_filter: optional callable(filename: str) -> bool, with exactly
+        the same meaning as in delete_dir_contents(): when given, only
+        files directly inside `path` whose name satisfies the filter are
+        counted, and subdirectories are skipped entirely. This keeps a
+        scan's size in step with what cleaning would really delete (e.g.
+        the Thumbnail Cache category only removes thumbcache_* files, so
+        the rest of the Explorer folder must not be counted as
+        reclaimable).
 
     Uses os.scandir() rather than os.walk() + os.path.getsize(): os.walk()
     already uses scandir() internally, but it throws away the per-entry
@@ -64,8 +73,12 @@ def get_dir_size(path: str) -> int:
                     if entry.is_symlink():
                         continue
                     if entry.is_dir(follow_symlinks=False):
+                        if file_filter is not None:
+                            continue  # mirrors delete_dir_contents
                         total += get_dir_size(entry.path)
                     else:
+                        if file_filter is not None and not file_filter(entry.name):
+                            continue
                         total += entry.stat(follow_symlinks=False).st_size
                 except OSError:
                     # File vanished, or permission denied — skip, don't crash.

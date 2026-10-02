@@ -97,6 +97,39 @@ class TestGetDirSize(unittest.TestCase):
         self.assertEqual(core.get_dir_size(self.tmp), 5000)
 
 
+class TestGetDirSizeFileFilter(unittest.TestCase):
+    """Regression: the Junk Cleanup scan used to count every file in a
+    folder even for categories whose cleaning only deletes files that
+    match a file_filter (Thumbnail Cache), so the shown size was far
+    larger than what cleaning actually freed.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        for name, size in (("thumbcache_256.db", 100), ("thumbcache_idx.db", 50), ("iconcache_48.db", 5000)):
+            with open(os.path.join(self.tmp, name), "wb") as f:
+                f.write(b"x" * size)
+        sub = os.path.join(self.tmp, "NotificationCache")
+        os.mkdir(sub)
+        with open(os.path.join(sub, "x.db"), "wb") as f:
+            f.write(b"x" * 3000)
+        self.filt = lambda name: name.lower().startswith("thumbcache_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_no_filter_counts_everything_as_before(self):
+        self.assertEqual(core.get_dir_size(self.tmp), 8150)
+
+    def test_filter_counts_only_matching_top_level_files(self):
+        self.assertEqual(core.get_dir_size(self.tmp, file_filter=self.filt), 150)
+
+    def test_filtered_size_equals_what_cleaning_really_frees(self):
+        shown = core.get_dir_size(self.tmp, file_filter=self.filt)
+        freed = core.delete_dir_contents(self.tmp, file_filter=self.filt)["deleted_bytes"]
+        self.assertEqual(shown, freed)
+
+
 class TestDeleteDirContents(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
