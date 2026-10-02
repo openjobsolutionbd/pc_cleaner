@@ -29,7 +29,7 @@ import history_log
 import error_log
 
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 
 
 # ----------------------------------------------------------------------
@@ -408,7 +408,7 @@ class CleanerApp:
 
         notebook.add(self.tab_quick, text="Quick Clean")
         notebook.add(self.tab_junk, text="Junk Cleanup")
-        notebook.add(self.tab_browser, text="Browser && Network")
+        notebook.add(self.tab_browser, text="Browser & Network")
         notebook.add(self.tab_startup, text="Startup Manager")
         notebook.pack(fill="both", expand=True, padx=10, pady=(4, 10))
 

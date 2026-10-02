@@ -211,7 +211,7 @@ class TestQuickCleanWorkerIntegration(unittest.TestCase):
 
 class TestTabStructure(unittest.TestCase):
     """The app has exactly four tabs: Quick Clean, Junk Cleanup,
-    Browser && Network, Startup Manager. Chrome Profile Manager and
+    Browser & Network, Startup Manager. Chrome Profile Manager and
     Shutdown Auto-Clean were removed in v1.5.0 at the user's request;
     the Startup Manager was kept.
     """
@@ -230,6 +230,16 @@ class TestTabStructure(unittest.TestCase):
     def test_exactly_four_tabs(self):
         notebook = self.app.tab_quick.master
         self.assertEqual(len(notebook.tabs()), 4)
+
+    def test_tab_titles_show_a_single_ampersand(self):
+        # Regression: the Browser tab was labelled "Browser && Network".
+        # ttk.Notebook does not treat "&" specially, so that showed up
+        # on screen as a literal double ampersand.
+        notebook = self.app.tab_quick.master
+        titles = [notebook.tab(t, "text") for t in notebook.tabs()]
+        self.assertIn("Browser & Network", titles)
+        for title in titles:
+            self.assertNotIn("&&", title)
 
     def test_startup_manager_tab_is_present_and_named(self):
         notebook = self.app.tab_quick.master
