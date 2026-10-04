@@ -308,6 +308,90 @@ class TestMoveFile(StartupFolderTestCase):
         self.assertTrue(os.path.exists(src))
 
 
+class TestMoveFileNeverOverwritesADifferentFile(StartupFolderTestCase):
+    """Regression: os.replace() used to overwrite a same-named file at
+    the destination without a word, so a shortcut could be lost. This
+    covers both directions (disable and enable).
+    """
+
+    def test_disable_does_not_overwrite_a_different_disabled_copy(self):
+        folder = self._user_startup_folder()
+        dst_folder = sm._disabled_subfolder(folder)
+        self._make_shortcut(dst_folder, content="OLD disabled copy")
+        src = self._make_shortcut(folder, content="NEW re-created copy")
+        messages = []
+
+        ok = sm._move_file(src, dst_folder, log=messages.append)
+
+        self.assertFalse(ok)
+        with open(os.path.join(dst_folder, "MyApp.lnk")) as f:
+            self.assertEqual(f.read(), "OLD disabled copy")
+        self.assertTrue(os.path.exists(src), "source must stay where it was")
+        self.assertIn("already exists", " ".join(messages))
+
+    def test_enable_does_not_overwrite_a_different_live_shortcut(self):
+        folder = self._user_startup_folder()
+        disabled = sm._disabled_subfolder(folder)
+        src = self._make_shortcut(disabled, content="stale disabled copy")
+        self._make_shortcut(folder, content="NEWER live shortcut")
+
+        ok = sm._move_file(src, folder, log=lambda m: None)
+
+        self.assertFalse(ok)
+        with open(os.path.join(folder, "MyApp.lnk")) as f:
+            self.assertEqual(f.read(), "NEWER live shortcut")
+        self.assertTrue(os.path.exists(src))
+
+    def test_identical_file_at_destination_is_fine_to_replace(self):
+        folder = self._user_startup_folder()
+        dst_folder = sm._disabled_subfolder(folder)
+        self._make_shortcut(dst_folder, content="same bytes")
+        src = self._make_shortcut(folder, content="same bytes")
+
+        ok = sm._move_file(src, dst_folder, log=lambda m: None)
+
+        self.assertTrue(ok)
+        self.assertFalse(os.path.exists(src))
+
+
+class TestMoveRegistryValueNeverOverwritesADifferentValue(StartupManagerTestCase):
+    """Regression: SetValueEx() used to replace a same-named value in the
+    destination key, losing the older command.
+    """
+
+    def test_different_value_at_destination_is_kept_and_nothing_changes(self):
+        self.fake.seed("HKCU", "backup", "MyApp", r"C:\old\app.exe")
+        self.fake.seed("HKCU", "run", "MyApp", r"C:\new\app.exe")
+        messages = []
+
+        ok = sm._move_registry_value("HKCU", "run", "backup", "MyApp", log=messages.append)
+
+        self.assertFalse(ok)
+        self.assertEqual(self.fake.store[("HKCU", "backup")]["MyApp"], (r"C:\old\app.exe", 1))
+        self.assertEqual(self.fake.store[("HKCU", "run")]["MyApp"], (r"C:\new\app.exe", 1))
+        self.assertIn("already exists", " ".join(messages))
+
+    def test_identical_value_at_destination_still_moves(self):
+        self.fake.seed("HKCU", "backup", "MyApp", r"C:\same\app.exe")
+        self.fake.seed("HKCU", "run", "MyApp", r"C:\same\app.exe")
+
+        ok = sm._move_registry_value("HKCU", "run", "backup", "MyApp", log=lambda m: None)
+
+        self.assertTrue(ok)
+        self.assertFalse(self.fake.has_value("HKCU", "run", "MyApp"))
+        self.assertTrue(self.fake.has_value("HKCU", "backup", "MyApp"))
+
+    def test_public_disable_reports_failure_and_keeps_both_values(self):
+        self.fake.seed("HKCU", sm.BACKUP_KEY_PATH, "MyApp", r"C:\old\app.exe")
+        self.fake.seed("HKCU", sm.RUN_KEY_PATH, "MyApp", r"C:\new\app.exe")
+        item = {"id": "registry-hkcu:MyApp", "name": "MyApp", "source": "registry-hkcu", "enabled": True}
+
+        ok = sm.disable_startup_item(item, log=lambda m: None)
+
+        self.assertFalse(ok)
+        self.assertEqual(self.fake.store[("HKCU", sm.BACKUP_KEY_PATH)]["MyApp"], (r"C:\old\app.exe", 1))
+
+
 class TestListStartupItemsFolderScan(StartupFolderTestCase):
     def test_finds_an_enabled_shortcut(self):
         folder = self._user_startup_folder()

@@ -15,6 +15,7 @@ This means a mistake is always reversible from inside the app itself.
 Only works on Windows (winreg is a Windows-only stdlib module).
 """
 
+import filecmp
 import os
 
 try:
@@ -195,6 +196,27 @@ def _move_registry_value(hive, from_path, to_path, value_name, log):
             log(f"Could not read startup entry: {e}")
             return False
 
+        # Never silently overwrite a DIFFERENT value that already lives at
+        # the destination under the same name (e.g. an app re-registered
+        # itself after being disabled, so the backup key still holds the
+        # older command): SetValueEx would replace it and that older
+        # command would be lost, which breaks "disable is always
+        # reversible". An identical value is safe to overwrite.
+        try:
+            existing = winreg.OpenKey(hive, to_path, 0, winreg.KEY_READ)
+            try:
+                existing_value = winreg.QueryValueEx(existing, value_name)
+            finally:
+                winreg.CloseKey(existing)
+        except OSError:
+            existing_value = None   # no destination key/value yet - the normal case
+        if existing_value is not None and existing_value != (value, value_type):
+            log(
+                f"Not changed: \"{value_name}\" already exists at the destination with a "
+                "different command, and overwriting it would lose that one. Nothing was modified."
+            )
+            return False
+
         # Step 1: copy the value into the destination key.
         try:
             dst_key = winreg.CreateKeyEx(hive, to_path, 0, winreg.KEY_ALL_ACCESS)
@@ -236,6 +258,16 @@ def _move_registry_value(hive, from_path, to_path, value_name, log):
         winreg.CloseKey(src_key)
 
 
+def _same_file_content(a, b) -> bool:
+    """True only if both files can be read and are byte-for-byte equal.
+    If they can't be compared, treat them as different (the safe answer).
+    """
+    try:
+        return filecmp.cmp(a, b, shallow=False)
+    except OSError:
+        return False
+
+
 def _move_file(src, dst_folder, log):
     if not os.path.exists(src):
         log(f"Startup item not found: {src}")
@@ -243,6 +275,16 @@ def _move_file(src, dst_folder, log):
     try:
         os.makedirs(dst_folder, exist_ok=True)
         dst = os.path.join(dst_folder, os.path.basename(src))
+        # os.replace() silently overwrites an existing file. Don't lose a
+        # different file that already sits at the destination under the
+        # same name; an identical one is safe to replace.
+        if os.path.exists(dst) and not _same_file_content(src, dst):
+            log(
+                f"Not changed: a different file named \"{os.path.basename(src)}\" already "
+                "exists at the destination, and overwriting it would lose that one. "
+                "Nothing was modified."
+            )
+            return False
         os.replace(src, dst)
         return True
     except OSError as e:
