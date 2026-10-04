@@ -30,11 +30,17 @@ def format_size(num_bytes: int) -> str:
     if num_bytes < 0:
         num_bytes = 0
     step = 1024.0
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if num_bytes < step:
-            return f"{num_bytes:.1f} {unit}" if unit != "B" else f"{int(num_bytes)} {unit}"
-        num_bytes /= step
-    return f"{num_bytes:.1f} PB"
+    units = ("B", "KB", "MB", "GB", "TB", "PB")
+    value = float(num_bytes)
+    for i, unit in enumerate(units):
+        if unit == "B":
+            if value < step:
+                return f"{int(value)} B"
+        elif i == len(units) - 1 or round(value, 1) < step:
+            # Compare the ROUNDED value: 1,048,575 bytes is 1023.999 KB,
+            # which prints as "1024.0 KB" - it must roll over to "1.0 MB".
+            return f"{value:.1f} {unit}"
+        value /= step
 
 
 def get_dir_size(path: str, file_filter=None) -> int:

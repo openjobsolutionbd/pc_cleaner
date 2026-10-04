@@ -33,6 +33,35 @@ class TestFormatSize(unittest.TestCase):
     def test_negative_clamped_to_zero(self):
         self.assertEqual(core.format_size(-100), "0 B")
 
+    def test_never_shows_1024_of_a_smaller_unit(self):
+        # Regression: 1,048,575 bytes (1023.999 KB) used to print as
+        # "1024.0 KB" instead of "1.0 MB".
+        self.assertEqual(core.format_size(1048575), "1.0 MB")
+
+    def test_rolls_over_at_every_unit_boundary(self):
+        cases = {
+            1024 ** 3 - 1: "1.0 GB",
+            1024 ** 4 - 1: "1.0 TB",
+            1024 ** 5 - 1: "1.0 PB",
+        }
+        for num_bytes, expected in cases.items():
+            with self.subTest(num_bytes=num_bytes):
+                self.assertEqual(core.format_size(num_bytes), expected)
+
+    def test_just_below_the_rollover_keeps_the_smaller_unit(self):
+        # 1023.9 KB still rounds to 1023.9 (< 1024), so no rollover.
+        self.assertEqual(core.format_size(1048473), "1023.9 KB")
+
+    def test_exact_unit_boundaries(self):
+        self.assertEqual(core.format_size(1023), "1023 B")
+        self.assertEqual(core.format_size(1024), "1.0 KB")
+        self.assertEqual(core.format_size(1024 ** 2), "1.0 MB")
+        self.assertEqual(core.format_size(1024 ** 3), "1.0 GB")
+
+    def test_largest_unit_is_not_rolled_further(self):
+        self.assertEqual(core.format_size(2 * 1024 ** 5), "2.0 PB")
+        self.assertEqual(core.format_size(1024 ** 6), "1024.0 PB")
+
 
 class TestGetDirSize(unittest.TestCase):
     def setUp(self):
