@@ -137,6 +137,10 @@ def clear_browsing_history(profile_dir: str, log=None) -> bool:
 
     Works on a temporary COPY of the History file, then swaps it in —
     so a crash mid-operation can't corrupt the original.
+
+    The deleted rows are also wiped from the file itself (secure_delete
+    + VACUUM), not merely unlinked from the tables — otherwise the old
+    URLs and titles stay recoverable from the file's free pages.
     """
     if log is None:
         log = lambda msg: None
@@ -167,9 +171,24 @@ def clear_browsing_history(profile_dir: str, log=None) -> bool:
             # guaranteed to end up in tmp_copy itself (not a stray -wal
             # file we'd forget to copy back).
             cur.execute("PRAGMA journal_mode=DELETE")
+            # Without this, SQLite only marks deleted rows' pages as free
+            # but leaves the old URLs/titles sitting in the file (stock
+            # SQLite builds, e.g. Python's on Windows, default it to
+            # OFF). Zero them out so "cleared" really means gone.
+            cur.execute("PRAGMA secure_delete=ON")
             cur.execute("DELETE FROM visits")
             cur.execute("DELETE FROM urls")
             conn.commit()
+            # Rebuild the file without the now-empty pages, which also
+            # drops any older leftovers Chrome itself had left behind.
+            # Best effort: the rows are already securely deleted above,
+            # so e.g. a full disk here must not turn a successful clear
+            # into a failure (the original file is untouched until the
+            # copy-back below either way).
+            try:
+                conn.execute("VACUUM")
+            except sqlite3.OperationalError:
+                pass
         finally:
             conn.close()
 

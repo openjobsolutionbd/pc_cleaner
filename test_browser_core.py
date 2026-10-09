@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import browser_core as bc
 
@@ -113,6 +114,93 @@ class TestClearBrowsingHistory(unittest.TestCase):
         rows = fresh.execute("SELECT url FROM urls").fetchall()
         fresh.close()
         self.assertEqual(rows, [], "cleared history reappeared after reopening - the stale WAL resurrected it")
+
+
+class TestClearedHistoryIsNotRecoverableFromTheFile(unittest.TestCase):
+    """Regression: clearing history used to empty the tables but leave the
+    old URLs/titles readable in the file's free pages whenever SQLite's
+    secure_delete is off (its stock default, e.g. in Python on Windows).
+    Every test here forces secure_delete OFF for the connection the app
+    opens, so the result doesn't depend on which platform runs the test.
+    """
+
+    MARKER = b"secret-site-7.example.com"
+
+    def setUp(self):
+        self.profile_dir = tempfile.mkdtemp()
+        self.history_path = os.path.join(self.profile_dir, "History")
+        conn = sqlite3.connect(self.history_path)
+        conn.execute("CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT, title TEXT)")
+        conn.execute("CREATE TABLE visits (id INTEGER PRIMARY KEY, url INTEGER, visit_time INTEGER)")
+        conn.execute("CREATE TABLE keep_me (id INTEGER PRIMARY KEY, note TEXT)")
+        for i in range(200):
+            conn.execute(
+                "INSERT INTO urls (url, title) VALUES (?, ?)",
+                (f"https://secret-site-{i}.example.com/private/page", f"Private title {i}"),
+            )
+            conn.execute("INSERT INTO visits (url, visit_time) VALUES (?, ?)", (i + 1, i))
+        conn.execute("INSERT INTO keep_me (note) VALUES ('untouched')")
+        conn.commit()
+        conn.close()
+
+    def tearDown(self):
+        shutil.rmtree(self.profile_dir, ignore_errors=True)
+
+    def _clear_with_secure_delete_off(self, vacuum_fails=False):
+        real_connect = sqlite3.connect
+
+        class _Conn:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, *args):
+                if vacuum_fails and sql.strip().upper() == "VACUUM":
+                    raise sqlite3.OperationalError("disk full (simulated)")
+                return self._conn.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        def connect_off(*args, **kwargs):
+            conn = real_connect(*args, **kwargs)
+            conn.execute("PRAGMA secure_delete=OFF")
+            return _Conn(conn)
+
+        with unittest.mock.patch.object(bc.sqlite3, "connect", connect_off):
+            return bc.clear_browsing_history(self.profile_dir)
+
+    def _file_bytes(self):
+        with open(self.history_path, "rb") as f:
+            return f.read()
+
+    def test_marker_is_present_before_clearing(self):
+        # Guards the other tests: they only mean something if the data is
+        # really in the file to begin with.
+        self.assertIn(self.MARKER, self._file_bytes())
+
+    def test_deleted_urls_are_gone_from_the_file_bytes(self):
+        self.assertTrue(self._clear_with_secure_delete_off())
+        self.assertEqual(bc.get_history_entry_count(self.profile_dir), 0)
+        data = self._file_bytes()
+        self.assertNotIn(self.MARKER, data)
+        self.assertNotIn(b"Private title 7", data)
+
+    def test_other_tables_survive(self):
+        self.assertTrue(self._clear_with_secure_delete_off())
+        conn = sqlite3.connect(self.history_path)
+        try:
+            rows = conn.execute("SELECT note FROM keep_me").fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(rows, [("untouched",)])
+
+    def test_failed_vacuum_does_not_fail_the_clear_and_still_wipes(self):
+        # If VACUUM can't run (e.g. disk full) the clear must still
+        # succeed, and secure_delete alone must already have zeroed the
+        # deleted rows.
+        self.assertTrue(self._clear_with_secure_delete_off(vacuum_fails=True))
+        self.assertEqual(bc.get_history_entry_count(self.profile_dir), 0)
+        self.assertNotIn(self.MARKER, self._file_bytes())
 
 
 def _make_profile(user_data_dir, profile_name):
