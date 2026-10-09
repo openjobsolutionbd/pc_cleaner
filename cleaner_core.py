@@ -112,6 +112,35 @@ def _is_link_or_reparse_point(entry) -> bool:
         return True
 
 
+def _remove_file(path: str) -> None:
+    """os.remove() that also copes with a file marked read-only.
+
+    On Windows, deleting a read-only file fails with PermissionError just
+    like a file that is genuinely in use — but a read-only file (typical
+    leftovers from installers, Office or git in Temp) is perfectly
+    deletable once the read-only bit is cleared. Only that one bit is
+    touched. If the file still can't be removed afterwards (it really is
+    in use), its original permissions are put back and the error is
+    raised, so the caller skips it exactly as before.
+    """
+    try:
+        os.remove(path)
+        return
+    except PermissionError:
+        mode = os.stat(path).st_mode
+        if mode & stat.S_IWRITE:
+            raise   # already writable, so not a read-only problem: genuinely denied / in use
+    os.chmod(path, mode | stat.S_IWRITE)
+    try:
+        os.remove(path)
+    except OSError:
+        try:
+            os.chmod(path, mode)
+        except OSError:
+            pass
+        raise
+
+
 def _remove_tree_best_effort(path: str, summary: dict) -> bool:
     """Delete `path` and everything inside it, one entry at a time, and
     NEVER stop at a file that can't be removed.
@@ -161,7 +190,7 @@ def _remove_tree_best_effort(path: str, summary: dict) -> bool:
         except OSError:
             size = 0
         try:
-            os.remove(full)
+            _remove_file(full)
         except OSError:
             # In use / permission denied: skip just this file, keep going.
             summary["skipped"].append(full)
@@ -256,7 +285,7 @@ def delete_dir_contents(path: str, log=None, file_filter=None) -> dict:
                     size_before = entry.stat(follow_symlinks=False).st_size
                 except OSError:
                     size_before = 0
-                os.remove(full)
+                _remove_file(full)
                 summary["deleted_bytes"] += size_before
                 summary["deleted_files"] += 1
         except OSError:

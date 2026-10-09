@@ -345,6 +345,97 @@ class _FakeCompletedProcess:
         self.stderr = stderr
 
 
+class TestReadOnlyFilesAreDeleted(unittest.TestCase):
+    """Regression: on Windows, os.remove() refuses a file marked read-only
+    (PermissionError), and that used to be treated as "in use" - so such
+    files (and their folders) were never cleaned. Linux doesn't behave
+    that way, so every test here patches os.remove to follow the Windows
+    rule: a file without the write bit can't be removed.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        real_remove = os.remove
+
+        def windows_remove(path, *a, **kw):
+            if not os.stat(path).st_mode & stat.S_IWRITE:
+                raise PermissionError(13, "[WinError 5] Access is denied", path)
+            return real_remove(path, *a, **kw)
+
+        self._patch = unittest.mock.patch("cleaner_core.os.remove", side_effect=windows_remove)
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+        for root, dirs, files in os.walk(self.tmp):
+            for name in files + dirs:
+                try:
+                    os.chmod(os.path.join(root, name), stat.S_IWRITE | stat.S_IREAD)
+                except OSError:
+                    pass
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _make(self, *parts, content=b"x" * 1000, readonly=False):
+        path = os.path.join(self.tmp, *parts)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(content)
+        if readonly:
+            os.chmod(path, stat.S_IREAD)
+        return path
+
+    def test_top_level_read_only_file_is_deleted_and_counted(self):
+        ro = self._make("locked_by_attribute.tmp", readonly=True)
+        summary = core.delete_dir_contents(self.tmp)
+        self.assertFalse(os.path.exists(ro))
+        self.assertEqual(summary["deleted_bytes"], 1000)
+        self.assertEqual(summary["skipped"], [])
+
+    def test_read_only_file_in_subfolder_lets_the_whole_folder_go(self):
+        self._make("pkg", "extracted.dll", readonly=True)
+        self._make("pkg", "other.dat")
+        summary = core.delete_dir_contents(self.tmp)
+        self.assertEqual(os.listdir(self.tmp), [])
+        self.assertEqual(summary["deleted_bytes"], 2000)
+        self.assertEqual(summary["skipped"], [])
+
+    def test_read_only_file_matching_a_file_filter_is_deleted(self):
+        ro = self._make("thumbcache_32.db", readonly=True)
+        keep = self._make("keep_me.txt", readonly=True)
+        core.delete_dir_contents(self.tmp, file_filter=lambda n: n.startswith("thumbcache_"))
+        self.assertFalse(os.path.exists(ro))
+        self.assertTrue(os.path.exists(keep), "non-matching file must survive")
+
+    def test_genuinely_denied_writable_file_is_still_skipped(self):
+        # Not read-only, so a PermissionError really means "in use".
+        locked = self._make("in_use.tmp")
+        original = os.remove.side_effect
+
+        def deny_that_file(path, *a, **kw):
+            if os.path.abspath(path) == os.path.abspath(locked):
+                raise PermissionError("simulated: file in use")
+            return original(path, *a, **kw)
+
+        os.remove.side_effect = deny_that_file
+        summary = core.delete_dir_contents(self.tmp)
+        self.assertTrue(os.path.exists(locked))
+        self.assertIn(locked, summary["skipped"])
+
+    def test_read_only_file_that_still_cannot_be_removed_is_restored(self):
+        # In use AND read-only: after clearing the bit the retry still
+        # fails, so the file must be skipped with its read-only bit back.
+        stuck = self._make("stuck.tmp", readonly=True)
+
+        def always_denied(path, *a, **kw):
+            raise PermissionError("simulated: file in use")
+
+        os.remove.side_effect = always_denied
+        summary = core.delete_dir_contents(self.tmp)
+        self.assertTrue(os.path.exists(stuck))
+        self.assertIn(stuck, summary["skipped"])
+        self.assertFalse(os.stat(stuck).st_mode & stat.S_IWRITE, "read-only bit must be put back")
+
+
 class TestWindowsUpdateServiceControl(unittest.TestCase):
     """stop_windows_update_service() now returns a string token instead of
     a bool so callers can distinguish three outcomes:
