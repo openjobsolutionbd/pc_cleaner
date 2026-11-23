@@ -29,7 +29,7 @@ import history_log
 import error_log
 
 
-__version__ = "1.5.7"
+__version__ = "1.5.8"
 
 
 # ----------------------------------------------------------------------
@@ -358,7 +358,16 @@ class CleanerApp:
                 func(*args)
         except queue.Empty:
             pass
-        self._poll_after_id = self.root.after(50, self._poll_queue)
+        finally:
+            # Always schedule the next poll, even if a queued callback
+            # raised. Otherwise one failing callback would end this
+            # timer for good: the error is reported by Tk's
+            # report_callback_exception hook (_handle_gui_exception),
+            # but every later UI update from a background worker -
+            # re-enabling buttons, status text, scan sizes - would
+            # silently never happen until the app is restarted. Any
+            # callbacks still waiting in the queue run on the next tick.
+            self._poll_after_id = self.root.after(50, self._poll_queue)
 
     def shutdown(self):
         """Stops the queue-polling timer. Call before destroying the root

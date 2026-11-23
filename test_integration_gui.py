@@ -234,6 +234,66 @@ class TestQuickCleanWorkerIntegration(unittest.TestCase):
         self.assertEqual(str(self.app.quick_clean_btn["state"]), "normal")
 
 
+class TestUiQueueSurvivesAFailingCallback(unittest.TestCase):
+    """Regression: _poll_queue() used to re-arm its own 50 ms timer only
+    AFTER draining the queue, so one queued callback that raised ended
+    the polling for good - every later UI update from a background
+    worker (button re-enable, status text, scan sizes) then never ran.
+    """
+
+    def setUp(self):
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as e:
+            self.skipTest(f"No display available to run the GUI: {e}")
+        # The app's own safety net would pop a modal dialog and write to
+        # the real error log; keep both out of the test run.
+        self._warn = unittest.mock.patch.object(wc.messagebox, "showwarning")
+        self.warn = self._warn.start()
+        self._rec = unittest.mock.patch.object(wc.error_log, "record", return_value=True)
+        self.record = self._rec.start()
+        self.app = wc.CleanerApp(self.root)
+
+    def tearDown(self):
+        self.app.shutdown()
+        self.root.destroy()
+        self._rec.stop()
+        self._warn.stop()
+
+    def _pump(self, ms=400):
+        self.root.after(ms, self.root.quit)
+        self.root.mainloop()
+
+    def test_callback_queued_after_a_failing_one_still_runs(self):
+        ran = []
+        self.app._ui(lambda: 1 / 0)
+        self._pump()
+        self.app._ui(ran.append, "after the failure")
+        self._pump()
+        self.assertEqual(ran, ["after the failure"])
+
+    def test_callbacks_in_the_same_batch_after_a_failure_still_run(self):
+        ran = []
+        self.app._ui(lambda: 1 / 0)
+        self.app._ui(ran.append, "same batch")
+        self._pump()
+        self.assertEqual(ran, ["same batch"])
+
+    def test_button_is_re_enabled_even_after_an_earlier_failure(self):
+        self.app._ui(lambda: 1 / 0)
+        self._pump()
+        self.app.quick_clean_btn.config(state="disabled")
+        self.app._ui(lambda: self.app.quick_clean_btn.config(state="normal"))
+        self._pump()
+        self.assertEqual(str(self.app.quick_clean_btn["state"]), "normal")
+
+    def test_the_failure_is_still_reported_not_swallowed(self):
+        self.app._ui(lambda: 1 / 0)
+        self._pump()
+        self.assertTrue(self.record.called, "error must still reach the error log")
+        self.assertTrue(self.warn.called, "user must still see the notice")
+
+
 class TestTabStructure(unittest.TestCase):
     """The app has exactly four tabs: Quick Clean, Junk Cleanup,
     Browser & Network, Startup Manager. Chrome Profile Manager and
