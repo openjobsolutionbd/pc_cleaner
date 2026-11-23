@@ -29,7 +29,7 @@ import history_log
 import error_log
 
 
-__version__ = "1.5.8"
+__version__ = "1.5.9"
 
 
 # ----------------------------------------------------------------------
@@ -516,6 +516,7 @@ class CleanerApp:
         total_freed = 0
         cleaned_ids = []
         skipped_admin = []
+        refused = []   # categories whose every folder was refused as protected
 
         for cat in safe_categories:
             if cat.get("needs_admin") and not cleaner_core.is_admin():
@@ -530,17 +531,23 @@ class CleanerApp:
                 continue
 
             cat_freed = 0
+            refused_count = 0
             file_filter = cat.get("file_filter")
             for p in cat["paths"]:
                 summary = cleaner_core.delete_dir_contents(p, log=None, file_filter=file_filter)
                 cat_freed += summary["deleted_bytes"]
+                if summary.get("refused"):
+                    refused_count += 1
+            if cat["paths"] and refused_count == len(cat["paths"]):
+                refused.append(cat["name"])
+                continue
             total_freed += cat_freed
             cleaned_ids.append(cat["id"])
 
-        self._ui(self._quick_clean_done, total_freed, cleaned_ids, skipped_admin)
+        self._ui(self._quick_clean_done, total_freed, cleaned_ids, skipped_admin, refused)
 
 
-    def _quick_clean_done(self, total_freed, cleaned_ids, skipped_admin):
+    def _quick_clean_done(self, total_freed, cleaned_ids, skipped_admin, refused=()):
         self.quick_clean_btn.config(state="normal")
 
         logged = history_log.log_cleanup({
@@ -558,10 +565,16 @@ class CleanerApp:
                 f"\n\n{len(skipped_admin)} categor{'y was' if len(skipped_admin) == 1 else 'ies were'} skipped without Administrator rights "
                 "(these can be cleaned from the Junk Cleanup tab in Administrator mode)."
             )
+        if refused:
+            message += (
+                f"\n\n{len(refused)} categor{'y was' if len(refused) == 1 else 'ies were'} skipped for safety: "
+                "its folder is a protected system or personal folder (check your Windows TEMP setting). "
+                "Nothing was deleted there."
+            )
         if not logged:
             message += "\n\nCouldn't save to the history log."
 
-        self.quick_status_label.config(text=message, fg=(Theme.WARNING if not logged else Theme.SUCCESS))
+        self.quick_status_label.config(text=message, fg=(Theme.WARNING if (not logged or refused) else Theme.SUCCESS))
 
         # Junk Cleanup tab's own size numbers are now stale (some of the
         # same safe categories were just emptied) — rescan it quietly so
@@ -739,13 +752,20 @@ class CleanerApp:
                     continue
 
             cat_freed = 0
+            refused_count = 0
             file_filter = cat.get("file_filter")
             for p in cat["paths"]:
                 summary = cleaner_core.delete_dir_contents(p, log, file_filter=file_filter)
                 cat_freed += summary["deleted_bytes"]
+                if summary.get("refused"):
+                    refused_count += 1
 
             if service_state == "stopped":
                 cleaner_core.start_windows_update_service(log)
+
+            if cat["paths"] and refused_count == len(cat["paths"]):
+                log(f"Skipped {cat['name']} — its folder is protected (check your Windows settings).")
+                continue
 
             total_freed += cat_freed
             cleaned_ids.append(cat["id"])

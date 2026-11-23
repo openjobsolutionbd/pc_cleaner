@@ -17,7 +17,7 @@ import string
 import subprocess
 import glob
 
-from cleaner_core import get_dir_size, is_windows
+from cleaner_core import get_dir_size, is_drive_root, is_protected_root, is_windows
 
 
 # ---------------------------------------------------------------------------
@@ -36,86 +36,10 @@ from cleaner_core import get_dir_size, is_windows
 #     prefix check) so a *subfolder* of e.g. Documents is still allowed —
 #     only the critical folder itself is blocked.
 
-_PROTECTED_FOLDER_NAMES = {
-    "windows", "program files", "program files (x86)", "programdata",
-    "users", "system32", "syswow64", "boot", "recovery",
-    "windows.old", "$recycle.bin", "perflogs",
-}
-
-_PROTECTED_USER_FOLDER_NAMES = {
-    "documents", "desktop", "pictures", "downloads", "videos", "music",
-    "onedrive", "appdata",
-}
-
-
-def is_drive_root(path: str) -> bool:
-    """True for "C:\\", "C:/", "D:\\", or POSIX "/" (used in tests).
-
-    Deliberately checks the raw string rather than relying on
-    os.path.splitdrive/ntpath, because this app must recognize Windows
-    drive letters correctly even in a Linux dev/test sandbox where
-    ntpath-specific parsing isn't the default — the app itself only
-    ever runs on Windows, but its safety checks are unit-tested here.
-    """
-    if not path:
-        return False
-    p = path.strip()
-    if p in ("/", "\\"):
-        return True
-    # Windows drive root: exactly "X:", "X:\", or "X:/"
-    if len(p) >= 2 and p[1] == ":" and p[0].isalpha():
-        rest = p[2:]
-        return rest in ("", "\\", "/")
-    return False
-
-
-def _split_path_parts(path: str) -> list:
-    """Splits a path into its component folder names, accepting both
-    "\\" and "/" as separators regardless of the current OS — needed
-    because these Windows-style paths are also exercised by unit tests
-    running on Linux, where os.path wouldn't treat "\\" as a separator.
-    """
-    normalized = path.replace("\\", "/")
-    return [part for part in normalized.split("/") if part]
-
-
-def is_protected_root(path: str) -> bool:
-    """True if `path` is a drive root or a well-known critical folder that
-    should never be scanned/emptied/deleted as a whole — e.g. the user's
-    own Documents folder, or C:\\Windows.
-
-    A SUBFOLDER of a protected folder (e.g. "C:\\Users\\Me\\Documents\\Old")
-    is NOT protected by this check — only the critical folder itself is.
-    This matches the app's guarantee ("root folders/drives are never
-    deleted") without also blocking legitimate cleanup inside e.g.
-    Downloads or a user's home directory.
-    """
-    if not path:
-        return True  # empty/None path is never safe to act on
-
-    if is_drive_root(path):
-        return True
-
-    parts = _split_path_parts(path)
-    if not parts:
-        return True
-
-    base = parts[-1].lower()
-
-    if base in _PROTECTED_FOLDER_NAMES:
-        return True
-
-    # User-profile-level folders like Documents/Desktop/Downloads are only
-    # protected when they sit directly under a user's home folder
-    # (…\Users\<name>\Documents), not if some other folder happens to
-    # share that name deeper in a path.
-    if base in _PROTECTED_USER_FOLDER_NAMES:
-        parent = parts[-2].lower() if len(parts) >= 2 else ""
-        grandparent = parts[-3].lower() if len(parts) >= 3 else ""
-        if parent == "users" or grandparent == "users":
-            return True
-
-    return False
+# The helpers themselves (is_drive_root / is_protected_root and their name
+# lists) live in cleaner_core.py, because the deletion engine there needs
+# the same guard - see delete_dir_contents(). They are imported above and
+# re-exported here, so system_tools.is_protected_root etc. keep working.
 
 
 def list_drives() -> list:

@@ -179,6 +179,28 @@ class TestQuickCleanWorkerIntegration(unittest.TestCase):
             "caution-badge category must NEVER be touched by Quick Clean",
         )
 
+    def test_protected_folder_category_is_refused_and_reported(self):
+        # A "safe" category whose folder is a protected one (e.g. TEMP set
+        # to Documents) must delete nothing, and the user must be told.
+        protected = os.path.join(self.tmp_dir, "Users", "Me", "Documents")
+        os.makedirs(protected)
+        with open(os.path.join(protected, "precious.docx"), "w") as f:
+            f.write("do not delete")
+        self.app.categories = [{
+            "id": "fake_protected", "name": "Fake Protected", "desc": "test",
+            "paths": [protected], "needs_admin": False,
+            "default_checked": True, "badge": "safe",
+        }]
+        with unittest.mock.patch.object(wc.cleaner_core, "is_admin", return_value=True), \
+             unittest.mock.patch.object(self.app, "scan_junk"):
+            self.app._quick_clean_worker()
+            self._pump()
+
+        self.assertEqual(os.listdir(protected), ["precious.docx"])
+        self.assertIn("skipped for safety", self.app.quick_status_label["text"])
+        history = history_log.read_history(self.log_file)
+        self.assertNotIn("fake_protected", history[0]["categories"])
+
     def test_needs_admin_safe_category_skipped_when_not_admin(self):
         with unittest.mock.patch.object(wc.cleaner_core, "is_admin", return_value=False), \
              unittest.mock.patch.object(self.app, "scan_junk"):

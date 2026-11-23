@@ -43,6 +43,103 @@ def format_size(num_bytes: int) -> str:
         value /= step
 
 
+# ---------------------------------------------------------------------------
+# Root / critical-folder protection
+# ---------------------------------------------------------------------------
+#
+# Used by delete_dir_contents() below (so NO cleaning category can ever
+# be pointed at a drive root or a critical folder - e.g. if the TEMP
+# environment variable has been set to the user's Documents folder), and
+# re-exported by system_tools.py for the folder tools there.
+#
+# is_protected_root() rejects:
+#   - a drive root itself ("C:\", "C:/", "/")
+#   - well-known critical OS/user folders, matched exactly (not just a
+#     prefix check) so a *subfolder* of e.g. Documents is still allowed -
+#     only the critical folder itself is blocked.
+
+_PROTECTED_FOLDER_NAMES = {
+    "windows", "program files", "program files (x86)", "programdata",
+    "users", "system32", "syswow64", "boot", "recovery",
+    "windows.old", "$recycle.bin", "perflogs",
+}
+
+_PROTECTED_USER_FOLDER_NAMES = {
+    "documents", "desktop", "pictures", "downloads", "videos", "music",
+    "onedrive", "appdata",
+}
+
+
+def is_drive_root(path: str) -> bool:
+    """True for "C:\\", "C:/", "D:\\", or POSIX "/" (used in tests).
+
+    Deliberately checks the raw string rather than relying on
+    os.path.splitdrive/ntpath, because this app must recognize Windows
+    drive letters correctly even in a Linux dev/test sandbox where
+    ntpath-specific parsing isn't the default — the app itself only
+    ever runs on Windows, but its safety checks are unit-tested here.
+    """
+    if not path:
+        return False
+    p = path.strip()
+    if p in ("/", "\\"):
+        return True
+    # Windows drive root: exactly "X:", "X:\", or "X:/"
+    if len(p) >= 2 and p[1] == ":" and p[0].isalpha():
+        rest = p[2:]
+        return rest in ("", "\\", "/")
+    return False
+
+
+def _split_path_parts(path: str) -> list:
+    """Splits a path into its component folder names, accepting both
+    "\\" and "/" as separators regardless of the current OS — needed
+    because these Windows-style paths are also exercised by unit tests
+    running on Linux, where os.path wouldn't treat "\\" as a separator.
+    """
+    normalized = path.replace("\\", "/")
+    return [part for part in normalized.split("/") if part]
+
+
+def is_protected_root(path: str) -> bool:
+    """True if `path` is a drive root or a well-known critical folder that
+    should never be scanned/emptied/deleted as a whole — e.g. the user's
+    own Documents folder, or C:\\Windows.
+
+    A SUBFOLDER of a protected folder (e.g. "C:\\Users\\Me\\Documents\\Old")
+    is NOT protected by this check — only the critical folder itself is.
+    This matches the app's guarantee ("root folders/drives are never
+    deleted") without also blocking legitimate cleanup inside e.g.
+    Downloads or a user's home directory.
+    """
+    if not path:
+        return True  # empty/None path is never safe to act on
+
+    if is_drive_root(path):
+        return True
+
+    parts = _split_path_parts(path)
+    if not parts:
+        return True
+
+    base = parts[-1].lower()
+
+    if base in _PROTECTED_FOLDER_NAMES:
+        return True
+
+    # User-profile-level folders like Documents/Desktop/Downloads are only
+    # protected when they sit directly under a user's home folder
+    # (…\Users\<name>\Documents), not if some other folder happens to
+    # share that name deeper in a path.
+    if base in _PROTECTED_USER_FOLDER_NAMES:
+        parent = parts[-2].lower() if len(parts) >= 2 else ""
+        grandparent = parts[-3].lower() if len(parts) >= 3 else ""
+        if parent == "users" or grandparent == "users":
+            return True
+
+    return False
+
+
 def get_dir_size(path: str, file_filter=None) -> int:
     """Recursively sum the size of every file under `path`.
     Never raises: unreadable/locked files are simply skipped (counted as 0).
@@ -238,14 +335,24 @@ def delete_dir_contents(path: str, log=None, file_filter=None) -> dict:
     subfolders that were removed completely.
 
     Returns a summary dict: {"deleted_bytes", "deleted_files",
-    "deleted_dirs", "skipped": [list of paths that could not be removed]}.
+    "deleted_dirs", "skipped": [list of paths that could not be removed],
+    "refused": True if `path` is a drive root / protected folder and
+    nothing was touched}.
     """
-    summary = {"deleted_bytes": 0, "deleted_files": 0, "deleted_dirs": 0, "skipped": []}
+    summary = {"deleted_bytes": 0, "deleted_files": 0, "deleted_dirs": 0, "skipped": [], "refused": False}
     if log is None:
         log = lambda msg: None
 
     if not path or not os.path.isdir(path):
         log(f"Path not found, skipping: {path}")
+        return summary
+
+    # Hard safety guarantee: never empty a drive root or a critical
+    # system/personal folder, whatever category or setting pointed us at
+    # it (a mis-set TEMP variable is the realistic way this could happen).
+    if is_protected_root(path):
+        log(f"Refused to clean a protected folder, skipping: {path}")
+        summary["refused"] = True
         return summary
 
     # os.scandir() instead of os.listdir(): each DirEntry carries cached

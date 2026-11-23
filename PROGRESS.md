@@ -4,7 +4,7 @@
 
 ## প্রজেক্ট কী
 
-Windows-এর জন্য একটা Junk cleanup + সিস্টেম মেইনটেন্যান্স Python/tkinter GUI অ্যাপ (নাম: **PC Cleaner**, বর্তমান ভার্সন **v1.5.8**), `.exe`-এ বিল্ড হয়। ব্যবহারকারী কোডিং জানেন না, মোবাইল থেকে কাজ করেন — তাই যেকোনো পরিবর্তন সবসময় স্পষ্ট বাংলা ব্যাখ্যাসহ, অ্যাপ্রুভাল নিয়ে করতে হবে।
+Windows-এর জন্য একটা Junk cleanup + সিস্টেম মেইনটেন্যান্স Python/tkinter GUI অ্যাপ (নাম: **PC Cleaner**, বর্তমান ভার্সন **v1.5.9**), `.exe`-এ বিল্ড হয়। ব্যবহারকারী কোডিং জানেন না, মোবাইল থেকে কাজ করেন — তাই যেকোনো পরিবর্তন সবসময় স্পষ্ট বাংলা ব্যাখ্যাসহ, অ্যাপ্রুভাল নিয়ে করতে হবে।
 
 **মূল উদ্দেশ্য (ব্যবহারকারীর নিজের ভাষায়, স্পষ্টভাবে বলা হয়েছে):** পিসিতে নিয়মিত জমে থাকা জাংক ফাইল ক্লিন রাখা, শাটডাউনের সময় এটা অটোমেটিক হওয়া, ব্রাউজার যেন স্মুথ ও দ্রুত থাকে সেজন্য ব্রাউজারে জমা ময়লা পরিষ্কার করা, আর সবচেয়ে গুরুত্বপূর্ণ — **এমন কোনো ফাইল কখনো ডিলিট না হওয়া যেটা কম্পিউটার চালাতে সমস্যা করে**। যেকোনো নতুন ফিচার বিবেচনা করার সময় এই চারটা লক্ষ্যের সাথে মেলে কিনা যাচাই করা উচিত — বিশেষ করে নিরাপত্তার শর্তটা (নিচের হার্ড গ্যারান্টি লিস্ট) কখনো শিথিল করা যাবে না, এমনকি স্পিড বা কনভিনিয়েন্সের জন্যও না।
 
@@ -21,17 +21,17 @@ Windows-এর জন্য একটা Junk cleanup + সিস্টেম �
 | `pc_cleaner.py` | মেইন GUI, Theme/styling, `__version__`। ৪টা ট্যাব: Quick Clean, Junk Cleanup, Browser & Network, Startup Manager |
 | `cleaner_core.py` | Junk file ক্লিনআপ লজিক |
 | `browser_core.py` | ব্রাউজার হিস্ট্রি/ক্যাশ ক্লিনআপ |
-| `system_tools.py` | Disk analyzer, empty folder finder, icon cache, drive helpers, root/critical-folder protection (`is_protected_root`) — **GUI ট্যাব v1.4.0-এ সরানো হয়েছে, মডিউল ও টেস্ট রয়ে গেছে** (header-এর ফ্রি-স্পেস pill এখনো এটা ব্যবহার করে) |
+| `system_tools.py` | Disk analyzer, empty folder finder, icon cache, drive helpers, root/critical-folder protection (v1.5.9 থেকে `is_protected_root` আসল সংজ্ঞা `cleaner_core.py`-তে, এখানে re-export) — **GUI ট্যাব v1.4.0-এ সরানো হয়েছে, মডিউল ও টেস্ট রয়ে গেছে** (header-এর ফ্রি-স্পেস pill এখনো এটা ব্যবহার করে) |
 | `startup_manager.py` | Startup প্রোগ্রাম চালু/বন্ধ (registry backup key: `PCCleanerBackup`) — Startup Manager ট্যাবে |
 | `history_log.py` | ক্লিনআপ লগ (ডেটা ফোল্ডার: `%LOCALAPPDATA%\PCCleaner`) — এখনো প্রতিটা ক্লিনআপে লেখা হয়, শুধু দেখার UI নেই |
 | `error_log.py` | এরর লগ (`error_log.json`) — এখনো প্রতিটা এররে লেখা হয়, শুধু দেখার UI নেই |
-| `test_*.py` | প্রতিটা মডিউলের ইউনিট/ইন্টিগ্রেশন টেস্ট (১৭২টা, GUI-সহ) |
+| `test_*.py` | প্রতিটা মডিউলের ইউনিট/ইন্টিগ্রেশন টেস্ট (১৮০টা, GUI-সহ) |
 | `Start_Here.bat` / `build_exe.bat` / `run_tests.bat` | লঞ্চার / .exe বিল্ড (`PCCleaner.exe`, `--onedir`) / টেস্ট রানার |
 | `lint.bat` / `pyproject.toml` | ঐচ্ছিক dev-টুল: Ruff (lint) + mypy (type check) — অ্যাপে বান্ডেল হয় না, শুধু ডেভেলপমেন্টে ব্যবহার হয়
 
 ## যাচাইয়ের পদ্ধতি
 
-এই sandbox-এ `apt-get install python3-tk xvfb` করে `xvfb-run python3 -m unittest discover` দিয়ে সব ১৭২টা টেস্ট (GUI-সহ) বাস্তবে চালিয়ে যাচাই করা যায় — GUI ভিজুয়াল যাচাইয়ের জন্য headless স্ক্রিনশটও নেওয়া সম্ভব। কোড শুধু পড়ে/কম্পাইল করে অনুমান না করে সবসময় বাস্তবে চালিয়ে যাচাই করা হয়। (নোট: এই নির্দিষ্ট sandbox session-এ apt-এর নেটওয়ার্ক অ্যাক্সেস ব্লকড ছিল বলে `python3-tk` ইনস্টল করা যায়নি — তখন `libarchive`/`ctypes` দিয়ে ম্যানুয়ালি আর্কাইভ পড়া হয়েছে এবং একটা হালকা tkinter স্টাব দিয়ে GUI-ওয়্যারিং যাচাই করা হয়েছে; non-GUI ১৮৩টা টেস্ট বাস্তবে রান করে দেখা হয়েছে। CI-তে (GitHub Actions) এখন Xvfb ইনস্টল করা থাকায় GUI টেস্টসহ সবকটাই সত্যিই রান হয়।)
+এই sandbox-এ `apt-get install python3-tk xvfb` করে `xvfb-run python3 -m unittest discover` দিয়ে সব ১৮০টা টেস্ট (GUI-সহ) বাস্তবে চালিয়ে যাচাই করা যায় — GUI ভিজুয়াল যাচাইয়ের জন্য headless স্ক্রিনশটও নেওয়া সম্ভব। কোড শুধু পড়ে/কম্পাইল করে অনুমান না করে সবসময় বাস্তবে চালিয়ে যাচাই করা হয়। (নোট: এই নির্দিষ্ট sandbox session-এ apt-এর নেটওয়ার্ক অ্যাক্সেস ব্লকড ছিল বলে `python3-tk` ইনস্টল করা যায়নি — তখন `libarchive`/`ctypes` দিয়ে ম্যানুয়ালি আর্কাইভ পড়া হয়েছে এবং একটা হালকা tkinter স্টাব দিয়ে GUI-ওয়্যারিং যাচাই করা হয়েছে; non-GUI ১৮৩টা টেস্ট বাস্তবে রান করে দেখা হয়েছে। CI-তে (GitHub Actions) এখন Xvfb ইনস্টল করা থাকায় GUI টেস্টসহ সবকটাই সত্যিই রান হয়।)
 
 ## Quick Clean ট্যাব (রোজকার ব্যবহারের জন্য)
 
@@ -59,6 +59,12 @@ Windows-এর জন্য একটা Junk cleanup + সিস্টেম �
 আগে Crash Dumps ডিফল্টে checked ছিল — ইউজারের অনুরোধে এখন unchecked (ইউজার নিজে চাইলে টিক দেবে)। "Windows Update Old Files" আর "Delivery Optimization Files" ক্যাটাগরি দুটো এই মেশিনে Windows Update স্থায়ীভাবে বন্ধ থাকায় আগেই সরানো হয়েছে (`disable_windows_update.bat/.reg` দেখুন)।
 
 **Chrome/Edge Cache এখন multi-profile + multi-folder (v1.4.1):** UI-তে কোনো নতুন বাটন/চেকবক্স নেই — একই দুইটা ক্যাটাগরি, শুধু ভেতরের `"paths"` এখন `cleaner_core._chromium_cache_paths()` দিয়ে ডাইনামিকভাবে বসে: `browser_core.get_browser_profiles()` দিয়ে প্রতিটা প্রোফাইল (আগে শুধু Default) খুঁজে বের করে প্রতিটার Cache, Code Cache, GPUCache, DawnCache, Service Worker CacheStorage/ScriptCache (আগে শুধু main Cache ফোল্ডার) যোগ করে। এই ক্যাটাগরি safe + ডিফল্টে checked, তাই Quick Clean-ও স্বয়ংক্রিয়ভাবে এই সুবিধা পায়। ইউজারের স্পষ্ট নির্দেশ ছিল app-এ নতুন অপশন/বাটন যোগ না করে existing ফিচার আরও ভালো করার — এই ধরনের রিকোয়েস্ট এলে সবসময় আগে দেখতে হবে existing ক্যাটাগরির ভেতরেই সমাধান হয় কিনা।
+
+## v1.5.9 — মোছার ইঞ্জিনে root/critical-folder পাহারা
+
+রিপোর সিনিয়র-ইঞ্জিনিয়ার রিভিউতে পাওয়া সবচেয়ে গুরুতর ফাঁক: "root ফোল্ডার কখনো ডিলিট হয় না" গ্যারান্টি শুধু `system_tools.is_protected_root`-এ ছিল (GUI-সংযোগহীন), আসল `cleaner_core.delete_dir_contents()`-এ পাহারা ছিল না — `TEMP` ভুল করে Documents-এ ঠেকলে "Clean" তার ফাইল মুছত (reproduce করা হয়েছে)। ফিক্স: গার্ড ফাংশনগুলো `cleaner_core.py`-তে সরানো (`system_tools` সেখান থেকে re-export — আগের নামে কাজ করে, circular import নেই), `delete_dir_contents()` শুরুতেই প্রত্যাখ্যান করে (`summary["refused"]`), Quick Clean/Junk Cleanup ব্যবহারকারীকে স্পষ্ট বার্তা দেয় এবং ঐ ক্যাটাগরিকে "cleaned" গণ্য করে না। ৮টা নতুন টেস্ট; ফিক্স ছাড়া চালালে ফেল করে। টেস্ট ১৭২ → ১৮০। **সিদ্ধান্ত:** `TEMP` RAM-ডিস্ক রুট হলে বাদ পড়ে + বার্তা (নিরাপত্তা-প্রথম)। headless `--auto-clean`-এ নীরবে বাদ।
+
+**রিভিউ থেকে পাওয়া বাকি সুপারিশ (এখনো করা হয়নি):** (১) mypy-তে `platform = win32` (ত্রুটি ৮০ → ৪৯ যাচাই করা, informational থাকুক); (২) Windows CI পরীক্ষামূলক, non-blocking (কিছু টেস্ট Linux ধরে নেয়, আর `tests.yml` বদলাতে `workflow` অনুমতিসহ টোকেন লাগে); (৩) Quick Clean-এ নতুন নিরাপদ ক্যাটাগরি — গার্ডের পরে, কারণ প্রতিটা নতুন ক্যাটাগরি নতুন মোছার পথ; (৪) গতি বাড়ানো — আগে মাপা হবে। **বাদ দেওয়া:** কভারেজ % বাড়ানো (অকভার লাইনগুলো সবই বিরল `except OSError` ফলব্যাক), ডকুমেন্টেশন পুনর্গঠন।
 
 ## v1.5.8 — একটা ব্যর্থ UI কলব্যাকে পুরো UI আপডেট বন্ধ হয়ে যেত
 

@@ -345,6 +345,73 @@ class _FakeCompletedProcess:
         self.stderr = stderr
 
 
+class TestDeletionEngineRefusesProtectedFolders(unittest.TestCase):
+    """The hard guarantee "root/critical folders are never emptied" used
+    to be enforced only in system_tools (which the GUI doesn't use), so
+    e.g. a TEMP variable pointing at Documents let "Clean" delete the
+    user's files. delete_dir_contents() now refuses such a path itself.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _folder_with_file(self, *parts):
+        folder = os.path.join(self.tmp, *parts)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "precious.docx"), "w") as f:
+            f.write("do not delete")
+        return folder
+
+    def test_documents_folder_is_refused_and_untouched(self):
+        docs = self._folder_with_file("Users", "Me", "Documents")
+        messages = []
+        summary = core.delete_dir_contents(docs, log=messages.append)
+        self.assertTrue(summary["refused"])
+        self.assertEqual(summary["deleted_bytes"], 0)
+        self.assertEqual(os.listdir(docs), ["precious.docx"])
+        self.assertIn("protected", " ".join(messages))
+
+    def test_named_system_folder_is_refused(self):
+        windows = self._folder_with_file("Windows")
+        summary = core.delete_dir_contents(windows)
+        self.assertTrue(summary["refused"])
+        self.assertEqual(os.listdir(windows), ["precious.docx"])
+
+    def test_drive_root_is_refused_before_anything_is_listed(self):
+        with unittest.mock.patch("cleaner_core.os.scandir", side_effect=AssertionError("must not list a drive root")):
+            summary = core.delete_dir_contents("/")
+        self.assertTrue(summary["refused"])
+
+    def test_subfolder_of_a_protected_folder_is_still_cleaned(self):
+        # Only the critical folder itself is blocked, not folders inside it.
+        inner = self._folder_with_file("Users", "Me", "Documents", "OldTemp")
+        summary = core.delete_dir_contents(inner)
+        self.assertFalse(summary["refused"])
+        self.assertEqual(os.listdir(inner), [])
+
+    def test_ordinary_folder_is_not_refused(self):
+        folder = self._folder_with_file("SomeApp", "cache")
+        summary = core.delete_dir_contents(folder)
+        self.assertFalse(summary["refused"])
+        self.assertEqual(os.listdir(folder), [])
+
+    def test_no_shipped_category_path_is_itself_protected(self):
+        # Guards against a future category (or a rename) accidentally
+        # pointing at something the engine would now silently refuse.
+        for cat in core.build_categories():
+            for path in cat["paths"]:
+                with self.subTest(category=cat["id"], path=path):
+                    self.assertFalse(core.is_protected_root(path))
+
+    def test_system_tools_still_exposes_the_same_helpers(self):
+        import system_tools
+        self.assertIs(system_tools.is_protected_root, core.is_protected_root)
+        self.assertIs(system_tools.is_drive_root, core.is_drive_root)
+
+
 class TestReadOnlyFilesAreDeleted(unittest.TestCase):
     """Regression: on Windows, os.remove() refuses a file marked read-only
     (PermissionError), and that used to be treated as "in use" - so such
