@@ -27,9 +27,11 @@ import system_tools
 import startup_manager
 import history_log
 import error_log
+import i18n
+import settings
 
 
-__version__ = "1.5.9"
+__version__ = "1.6.0"
 
 
 # ----------------------------------------------------------------------
@@ -237,10 +239,13 @@ class LogBox:
         scrollbar.pack(side="right", fill="y")
 
     def log(self, msg):
-        self.text.configure(state="normal")
-        self.text.insert("end", str(msg) + "\n")
-        self.text.see("end")
-        self.text.configure(state="disabled")
+        try:
+            self.text.configure(state="normal")
+            self.text.insert("end", str(msg) + "\n")
+            self.text.see("end")
+            self.text.configure(state="disabled")
+        except tk.TclError:
+            pass   # the widget was destroyed (e.g. the language was switched)
 
     def pack(self, **kw):
         self.frame.pack(**kw)
@@ -285,6 +290,11 @@ class CleanerApp:
         self.category_sizes = {}
         self._free_before = None
 
+        # Counts background jobs that are running right now, so the
+        # language switch can wait until none is (it rebuilds the screen).
+        self._jobs_lock = threading.Lock()
+        self._active_jobs = 0
+
         # Background threads never touch Tk widgets directly (Tkinter is
         # not thread-safe). Instead they push (function, args) onto this
         # queue, and the main thread drains it on a timer. This is the
@@ -313,12 +323,7 @@ class CleanerApp:
             error_log.record("gui_callback", exc_value, tb_str)
         except Exception:
             pass
-        messagebox.showwarning(
-            "ছোট একটা সমস্যা হয়েছে",
-            "একটা অপ্রত্যাশিত সমস্যা হয়েছিল, কিন্তু অ্যাপ চলছে এবং কোনো ফাইল মোছা হয়নি।\n\n"
-            "বিস্তারিত error_log.json ফাইলে সংরক্ষিত হয়েছে — এই ফাইলটা Claude-কে "
-            "দেখালে দ্রুত ফিক্স করা যাবে।"
-        )
+        messagebox.showwarning(i18n.t("err.title"), i18n.t("err.gui_body"))
 
     def _run_safely(self, fn, *args, **kwargs):
         """Safety net part 2 of 2 — wraps every background-thread worker
@@ -332,6 +337,8 @@ class CleanerApp:
         name attached, and reported through the same UI queue every
         worker already uses to talk to the main thread.
         """
+        with self._jobs_lock:
+            self._active_jobs += 1
         try:
             fn(*args, **kwargs)
         except Exception as exc:
@@ -340,12 +347,10 @@ class CleanerApp:
                 error_log.record(worker_name, exc)
             except Exception:
                 pass
-            self._ui(lambda: messagebox.showwarning(
-                "ছোট একটা সমস্যা হয়েছে",
-                "একটা কাজ চলার সময় অপ্রত্যাশিত সমস্যা হয়েছিল এবং সেটা থেমে গেছে, "
-                "কিন্তু বাকি অ্যাপ ঠিকঠাক চলছে।\n\n"
-                "বিস্তারিত error_log.json ফাইলে সংরক্ষিত হয়েছে।"
-            ))
+            self._ui(lambda: messagebox.showwarning(i18n.t("err.title"), i18n.t("err.worker_body")))
+        finally:
+            with self._jobs_lock:
+                self._active_jobs -= 1
 
     def _ui(self, func, *args):
         """Call from any thread to safely run func(*args) on the main thread."""
@@ -396,7 +401,7 @@ class CleanerApp:
         title_frame = tk.Frame(header, bg=Theme.BG)
         title_frame.pack(side="left")
         tk.Label(title_frame, text="PC Cleaner", bg=Theme.BG, fg=Theme.TEXT, font=(Theme.FONT_FAMILY, 15, "bold")).pack(anchor="w")
-        tk.Label(title_frame, text=f"Free up space and keep your PC tidy  ·  v{__version__}", bg=Theme.BG, fg=Theme.TEXT_MUTED, font=Theme.FONT_MUTED).pack(anchor="w")
+        tk.Label(title_frame, text=i18n.t("app.tagline", version=__version__), bg=Theme.BG, fg=Theme.TEXT_MUTED, font=Theme.FONT_MUTED).pack(anchor="w")
 
         drive_pill = tk.Frame(header, bg=Theme.SUCCESS_SOFT)
         drive_pill.pack(side="right", anchor="e")
@@ -407,6 +412,11 @@ class CleanerApp:
         self.header_drive_label.pack()
         self._refresh_header_drive_label()
 
+        # Bangla <-> English switch (shows the language you would switch TO).
+        ttk.Button(header, text=i18n.t("lang.switch"), command=self.toggle_language).pack(
+            side="right", padx=(0, 10)
+        )
+
         ttk.Separator(self.root).pack(fill="x", padx=0, pady=(0, 2))
 
         notebook = ttk.Notebook(self.root)
@@ -415,10 +425,10 @@ class CleanerApp:
         self.tab_browser = ttk.Frame(notebook)
         self.tab_startup = ttk.Frame(notebook)
 
-        notebook.add(self.tab_quick, text="Quick Clean")
-        notebook.add(self.tab_junk, text="Junk Cleanup")
-        notebook.add(self.tab_browser, text="Browser & Network")
-        notebook.add(self.tab_startup, text="Startup Manager")
+        notebook.add(self.tab_quick, text=i18n.t("tab.quick"))
+        notebook.add(self.tab_junk, text=i18n.t("tab.junk"))
+        notebook.add(self.tab_browser, text=i18n.t("tab.browser"))
+        notebook.add(self.tab_startup, text=i18n.t("tab.startup"))
         notebook.pack(fill="both", expand=True, padx=10, pady=(4, 10))
 
         self._build_quick_tab()
@@ -431,7 +441,36 @@ class CleanerApp:
         usage = system_tools.get_free_space(system_drive)
         if usage:
             total, used, free = usage
-            self.header_drive_label.config(text=f"{system_drive}  {cleaner_core.format_size(free)} free of {cleaner_core.format_size(total)}")
+            self.header_drive_label.config(text=i18n.t(
+                "header.drive", drive=system_drive,
+                free=cleaner_core.format_size(free), total=cleaner_core.format_size(total),
+            ))
+
+    def toggle_language(self):
+        """Switch between Bangla and English, remember the choice, and
+        rebuild the screen. Waits while a background job is running,
+        because those jobs report back to widgets that would be rebuilt.
+        """
+        with self._jobs_lock:
+            busy = self._active_jobs > 0
+        if busy:
+            messagebox.showinfo("PC Cleaner", i18n.t("lang.busy"))
+            return
+        new_lang = i18n.other_language()
+        i18n.set_language(new_lang)
+        try:
+            settings.set_language(new_lang)
+        except Exception:
+            pass   # failing to remember the choice must never break the switch
+        self._rebuild_ui()
+
+    def _rebuild_ui(self):
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        self.category_vars = {}
+        self.category_size_labels = {}
+        self._build_ui()
+        self.refresh_startup_items()
 
     # ------------------------------------------------------------------
     # Tab 1: Junk Cleanup
@@ -455,19 +494,18 @@ class CleanerApp:
         tk.Label(icon_circle, text="\U0001F9F9", bg=Theme.PRIMARY_SOFT, font=(Theme.FONT_FAMILY, 18)).pack(expand=True)
 
         tk.Label(
-            inner, text="Everyday Cleanup", bg=Theme.SURFACE, fg=Theme.TEXT,
+            inner, text=i18n.t("quick.title"), bg=Theme.SURFACE, fg=Theme.TEXT,
             font=(Theme.FONT_FAMILY, 17, "bold"),
         ).pack(anchor="w")
         tk.Label(
             inner,
-            text="Only safe junk files (Temp, Cache, Recycle Bin, etc.) will be cleaned.\n"
-                 "Documents, photos, and programs are never touched.",
+            text=i18n.t("quick.desc"),
             bg=Theme.SURFACE, fg=Theme.TEXT_MUTED, font=Theme.FONT_BASE,
             justify="left", wraplength=560,
         ).pack(anchor="w", pady=(6, 20))
 
         self.quick_clean_btn = ttk.Button(
-            inner, text="Clean Now", style="Accent.TButton", command=self.quick_clean,
+            inner, text=i18n.t("quick.button"), style="Accent.TButton", command=self.quick_clean,
         )
         self.quick_clean_btn.pack(anchor="w", ipadx=20, ipady=10)
 
@@ -487,22 +525,18 @@ class CleanerApp:
     def _refresh_quick_last_cleaned(self):
         history = history_log.read_history()
         if not history:
-            self.quick_last_cleaned_label.config(text="No cleanup has been run yet.")
+            self.quick_last_cleaned_label.config(text=i18n.t("quick.never"))
             return
         last = history[-1]
         when = last.get("timestamp", "")
         freed = cleaner_core.format_size(last.get("bytes_freed", 0))
-        self.quick_last_cleaned_label.config(text=f"Last cleaned: {when}  ·  {freed} freed")
+        self.quick_last_cleaned_label.config(text=i18n.t("quick.last", when=when, freed=freed))
 
     def quick_clean(self):
-        if not messagebox.askyesno(
-            "Confirm",
-            "Clean safe junk files (Temp, Cache, Recycle Bin, etc.)?\n\n"
-            "Documents, photos, and programs will not be touched.",
-        ):
+        if not messagebox.askyesno(i18n.t("common.confirm"), i18n.t("quick.confirm")):
             return
         self.quick_clean_btn.config(state="disabled")
-        self.quick_status_label.config(text="Cleaning…", fg=Theme.TEXT_MUTED)
+        self.quick_status_label.config(text=i18n.t("quick.cleaning"), fg=Theme.TEXT_MUTED)
         threading.Thread(target=self._run_safely, args=(self._quick_clean_worker,), daemon=True).start()
 
     def _quick_clean_worker(self):
@@ -559,20 +593,13 @@ class CleanerApp:
         self._refresh_quick_last_cleaned()
         self._refresh_header_drive_label()
 
-        message = f"{cleaner_core.format_size(total_freed)} of space freed."
+        message = i18n.t("quick.done", freed=cleaner_core.format_size(total_freed))
         if skipped_admin:
-            message += (
-                f"\n\n{len(skipped_admin)} categor{'y was' if len(skipped_admin) == 1 else 'ies were'} skipped without Administrator rights "
-                "(these can be cleaned from the Junk Cleanup tab in Administrator mode)."
-            )
+            message += i18n.t("quick.skipped_admin", n=len(skipped_admin))
         if refused:
-            message += (
-                f"\n\n{len(refused)} categor{'y was' if len(refused) == 1 else 'ies were'} skipped for safety: "
-                "its folder is a protected system or personal folder (check your Windows TEMP setting). "
-                "Nothing was deleted there."
-            )
+            message += i18n.t("quick.refused", n=len(refused))
         if not logged:
-            message += "\n\nCouldn't save to the history log."
+            message += i18n.t("quick.history_fail")
 
         self.quick_status_label.config(text=message, fg=(Theme.WARNING if (not logged or refused) else Theme.SUCCESS))
 
@@ -589,14 +616,14 @@ class CleanerApp:
             banner.pack(fill="x", padx=14, pady=(14, 0))
             tk.Label(
                 banner,
-                text="⚠  Not running as Administrator — some categories will be skipped.",
+                text=i18n.t("junk.admin_banner"),
                 bg=Theme.WARNING_BG,
                 fg=Theme.WARNING,
                 font=Theme.FONT_BASE,
                 padx=12,
                 pady=10,
             ).pack(side="left")
-            ttk.Button(banner, text="Restart as Administrator", command=self.restart_as_admin).pack(
+            ttk.Button(banner, text=i18n.t("junk.restart_admin"), command=self.restart_as_admin).pack(
                 side="right", padx=10, pady=8
             )
 
@@ -625,26 +652,26 @@ class CleanerApp:
             name_row = tk.Frame(text_frame, bg=Theme.SURFACE)
             name_row.pack(anchor="w", fill="x")
 
-            name = cat["name"]
+            name = i18n.cat_name(cat)
             if cat.get("needs_admin"):
-                name += "  (needs Administrator)"
+                name += i18n.t("junk.needs_admin")
             tk.Label(name_row, text=name, bg=Theme.SURFACE, fg=Theme.TEXT, font=(Theme.FONT_FAMILY, 10, "bold")).pack(side="left")
 
             badge = cat.get("badge")
             if badge == "safe":
                 tk.Label(
-                    name_row, text="  Safe — daily cleanup  ",
+                    name_row, text=i18n.t("badge.safe"),
                     bg=Theme.SUCCESS_SOFT, fg=Theme.SUCCESS, font=Theme.FONT_MUTED,
                 ).pack(side="left", padx=(10, 0))
             elif badge == "caution":
                 tk.Label(
-                    name_row, text="  Use caution  ",
+                    name_row, text=i18n.t("badge.caution"),
                     bg=Theme.WARNING_BG, fg=Theme.WARNING, font=Theme.FONT_MUTED,
                 ).pack(side="left", padx=(10, 0))
 
             tk.Label(
                 text_frame,
-                text=cat["desc"],
+                text=i18n.cat_desc(cat),
                 bg=Theme.SURFACE,
                 fg=Theme.TEXT_MUTED,
                 font=Theme.FONT_MUTED,
@@ -660,11 +687,11 @@ class CleanerApp:
 
         btn_row = ttk.Frame(frame)
         btn_row.pack(fill="x", padx=12, pady=(0, 12))
-        self.scan_btn = ttk.Button(btn_row, text="Scan", command=self.scan_junk)
+        self.scan_btn = ttk.Button(btn_row, text=i18n.t("junk.scan"), command=self.scan_junk)
         self.scan_btn.pack(side="left")
-        self.clean_btn = ttk.Button(btn_row, text="Clean Selected", style="Accent.TButton", command=self.clean_junk)
+        self.clean_btn = ttk.Button(btn_row, text=i18n.t("junk.clean_selected"), style="Accent.TButton", command=self.clean_junk)
         self.clean_btn.pack(side="left", padx=8)
-        self.total_label = ttk.Label(btn_row, text="Total reclaimable: —", style="Total.TLabel")
+        self.total_label = ttk.Label(btn_row, text=i18n.t("junk.total_none"), style="Total.TLabel")
         self.total_label.pack(side="right")
 
         self.junk_log = LogBox(frame, height=7)
@@ -693,24 +720,25 @@ class CleanerApp:
         self._ui(self._scan_done, total)
 
     def _update_category_size(self, cat_id, size):
-        self.category_size_labels[cat_id].config(text=cleaner_core.format_size(size))
+        label = self.category_size_labels.get(cat_id)
+        if label is None:
+            return
+        try:
+            label.config(text=cleaner_core.format_size(size))
+        except tk.TclError:
+            pass   # widget was destroyed by a language switch
 
     def _scan_done(self, total):
-        self.total_label.config(text=f"Total reclaimable: {cleaner_core.format_size(total)}")
+        self.total_label.config(text=i18n.t("junk.total", size=cleaner_core.format_size(total)))
         self.scan_btn.config(state="normal")
-        self.junk_log.log("Scan complete.")
+        self.junk_log.log(i18n.t("junk.scan_done"))
 
     def clean_junk(self):
         selected = [c for c in self.categories if self.category_vars[c["id"]].get()]
         if not selected:
-            messagebox.showinfo("Nothing selected", "Please select at least one category.")
+            messagebox.showinfo(i18n.t("common.nothing_selected"), i18n.t("junk.select_one"))
             return
-        if not messagebox.askyesno(
-            "Confirm cleanup",
-            f"Delete files in {len(selected)} selected categories?\n\n"
-            "These are temporary/cache files only — no personal documents, "
-            "photos, or programs will be touched.",
-        ):
+        if not messagebox.askyesno(i18n.t("junk.confirm_title"), i18n.t("junk.confirm_body", n=len(selected))):
             return
         self.clean_btn.config(state="disabled")
         system_drive = os.environ.get("SYSTEMDRIVE", "C:") + "\\"
@@ -725,7 +753,7 @@ class CleanerApp:
 
         for cat in selected:
             if cat.get("needs_admin") and not cleaner_core.is_admin():
-                log(f"Skipped {cat['name']} — needs Administrator.")
+                log(i18n.t("junk.log.skip_admin", name=i18n.cat_name(cat)))
                 continue
 
             if cat.get("special") == "recycle_bin":
@@ -733,9 +761,9 @@ class CleanerApp:
                 if cleaner_core.empty_recycle_bin():
                     total_freed += freed
                     cleaned_ids.append(cat["id"])
-                    log("Recycle Bin emptied.")
+                    log(i18n.t("junk.log.bin_emptied"))
                 else:
-                    log("Could not empty Recycle Bin.")
+                    log(i18n.t("junk.log.bin_failed"))
                 continue
 
             # For categories that require the Windows Update service to be
@@ -748,7 +776,7 @@ class CleanerApp:
             if cat.get("stop_service"):
                 service_state = cleaner_core.stop_windows_update_service(log)
                 if service_state == "failed":
-                    log(f"Skipped {cat['name']} — could not stop Windows Update service.")
+                    log(i18n.t("junk.log.service_fail", name=i18n.cat_name(cat)))
                     continue
 
             cat_freed = 0
@@ -764,17 +792,17 @@ class CleanerApp:
                 cleaner_core.start_windows_update_service(log)
 
             if cat["paths"] and refused_count == len(cat["paths"]):
-                log(f"Skipped {cat['name']} — its folder is protected (check your Windows settings).")
+                log(i18n.t("junk.log.protected", name=i18n.cat_name(cat)))
                 continue
 
             total_freed += cat_freed
             cleaned_ids.append(cat["id"])
-            log(f"{cat['name']}: freed {cleaner_core.format_size(cat_freed)}")
+            log(i18n.t("junk.log.freed", name=i18n.cat_name(cat), size=cleaner_core.format_size(cat_freed)))
 
         self._ui(self._clean_done, total_freed, cleaned_ids)
 
     def _clean_done(self, total_freed, cleaned_ids):
-        self.junk_log.log(f"Done. Freed approximately {cleaner_core.format_size(total_freed)}.")
+        self.junk_log.log(i18n.t("junk.log.done", size=cleaner_core.format_size(total_freed)))
         self.clean_btn.config(state="normal")
         logged = history_log.log_cleanup({
             "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -783,7 +811,7 @@ class CleanerApp:
             "mode": "manual",
         })
         if not logged:
-            self.junk_log.log("Warning: could not save this cleanup to the history log.")
+            self.junk_log.log(i18n.t("junk.log.history_fail"))
 
         system_drive = os.environ.get("SYSTEMDRIVE", "C:") + "\\"
 
@@ -791,17 +819,20 @@ class CleanerApp:
             usage_after = system_tools.get_free_space(system_drive)
             free_after = usage_after[2] if usage_after else None
 
-            summary_lines = [f"Freed approximately {cleaner_core.format_size(total_freed)}."]
+            summary_lines = [i18n.t("junk.summary.freed", size=cleaner_core.format_size(total_freed))]
             if free_after is not None:
                 actual_gain = free_after - self._free_before
                 summary_lines.append("")
-                summary_lines.append(f"Free space on {system_drive}")
-                summary_lines.append(f"  Before:  {cleaner_core.format_size(self._free_before)}")
-                summary_lines.append(f"  After:   {cleaner_core.format_size(free_after)}")
-                summary_lines.append(f"  Gained:  {cleaner_core.format_size(max(actual_gain, 0))}")
-                self.junk_log.log(f"Free space on {system_drive}: {cleaner_core.format_size(self._free_before)} -> {cleaner_core.format_size(free_after)}")
+                summary_lines.append(i18n.t("junk.summary.drive", drive=system_drive))
+                summary_lines.append(i18n.t("junk.summary.before", size=cleaner_core.format_size(self._free_before)))
+                summary_lines.append(i18n.t("junk.summary.after", size=cleaner_core.format_size(free_after)))
+                summary_lines.append(i18n.t("junk.summary.gained", size=cleaner_core.format_size(max(actual_gain, 0))))
+                self.junk_log.log(i18n.t(
+                    "junk.log.space", drive=system_drive,
+                    before=cleaner_core.format_size(self._free_before), after=cleaner_core.format_size(free_after),
+                ))
 
-            messagebox.showinfo("Cleanup complete", "\n".join(summary_lines))
+            messagebox.showinfo(i18n.t("junk.complete_title"), "\n".join(summary_lines))
             self._refresh_header_drive_label()
 
         self._free_before = None
@@ -841,45 +872,40 @@ class CleanerApp:
                 # Launch request rejected by the OS (not a UAC cancel —
                 # those never reach here). Restore the window and report.
                 self.root.deiconify()
-                messagebox.showerror(
-                    "Error",
-                    f"Could not request Administrator restart (code {ret}).\n"
-                    "Try right-clicking the app and choosing 'Run as administrator'."
-                )
+                messagebox.showerror(i18n.t("common.error"), i18n.t("admin.restart_fail", code=ret))
             else:
                 # Request accepted — UAC dialog is (or will be) showing.
                 # Give it 300 ms to appear, then close this instance.
                 self.root.after(300, lambda: (self.shutdown(), self.root.destroy()))
         except Exception as e:
             self.root.deiconify()
-            messagebox.showerror("Error", f"Could not restart as administrator: {e}")
+            messagebox.showerror(i18n.t("common.error"), i18n.t("admin.restart_exc", err=e))
 
     # ------------------------------------------------------------------
     # Tab 2: Browser & Network
     # ------------------------------------------------------------------
     def _build_browser_tab(self):
         frame = self.tab_browser
-        ttk.Label(frame, text="Browsing History", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
+        ttk.Label(frame, text=i18n.t("br.history_title"), style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
         ttk.Label(
             frame,
-            text="Clears visited-site history only. Cookies, saved passwords, and logins are never touched — "
-                 "you will not be logged out of any site.",
+            text=i18n.t("br.history_desc"),
             style="Muted.TLabel", wraplength=760, justify="left",
         ).pack(anchor="w", padx=10)
 
-        self.browser_status_label = ttk.Label(frame, text="Click \"Check Status\" to scan.")
+        self.browser_status_label = ttk.Label(frame, text=i18n.t("br.status_initial"))
         self.browser_status_label.pack(anchor="w", padx=10, pady=5)
 
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(anchor="w", padx=10, pady=5)
-        ttk.Button(btn_frame, text="Check Status", command=self.check_browser_status).pack(side="left")
-        self.clear_history_btn = ttk.Button(btn_frame, text="Clear Browsing History", style="Accent.TButton", command=self.clear_history, state="disabled")
+        ttk.Button(btn_frame, text=i18n.t("br.check"), command=self.check_browser_status).pack(side="left")
+        self.clear_history_btn = ttk.Button(btn_frame, text=i18n.t("br.clear"), style="Accent.TButton", command=self.clear_history, state="disabled")
         self.clear_history_btn.pack(side="left", padx=5)
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
-        ttk.Label(frame, text="Network", style="Section.TLabel").pack(anchor="w", padx=10)
-        ttk.Label(frame, text="Clears stale website-address lookups. Can fix some \"site won't load\" issues.", style="Muted.TLabel").pack(anchor="w", padx=10)
-        ttk.Button(frame, text="Flush DNS Cache", command=self.flush_dns).pack(anchor="w", padx=10, pady=5)
+        ttk.Label(frame, text=i18n.t("br.network_title"), style="Section.TLabel").pack(anchor="w", padx=10)
+        ttk.Label(frame, text=i18n.t("br.network_desc"), style="Muted.TLabel").pack(anchor="w", padx=10)
+        ttk.Button(frame, text=i18n.t("br.flush"), command=self.flush_dns).pack(anchor="w", padx=10, pady=5)
 
         ttk.Separator(frame).pack(fill="x", padx=10, pady=10)
         self.browser_log = LogBox(frame, height=8)
@@ -897,10 +923,10 @@ class CleanerApp:
             running = browser_core.is_browser_running(browser_name)
             if running:
                 running_any = True
-            status = " (running — close it first)" if running else ""
-            lines.append(f"{label}: {count} history entries{status}")
+            status = i18n.t("br.running") if running else ""
+            lines.append(i18n.t("br.entry", label=label, count=count, status=status))
         if not profiles:
-            lines.append("No supported browsers found (Chrome/Edge).")
+            lines.append(i18n.t("br.none"))
         self._ui(self._update_browser_status, "\n".join(lines), running_any, bool(profiles))
 
     def _update_browser_status(self, text, running_any, has_profiles):
@@ -908,10 +934,7 @@ class CleanerApp:
         self.clear_history_btn.config(state=("normal" if has_profiles and not running_any else "disabled"))
 
     def clear_history(self):
-        if not messagebox.askyesno(
-            "Confirm",
-            "Clear browsing history for all detected browsers?\n\nThis will NOT log you out of any site.",
-        ):
+        if not messagebox.askyesno(i18n.t("common.confirm"), i18n.t("br.confirm")):
             return
         threading.Thread(target=self._run_safely, args=(self._clear_history_worker,), daemon=True).start()
 
@@ -920,10 +943,10 @@ class CleanerApp:
         profiles = browser_core.get_browser_profiles()
         for label, (browser_name, path) in profiles.items():
             if browser_core.is_browser_running(browser_name):
-                log(f"Skipped {label} — please close it first.")
+                log(i18n.t("br.log.skip", label=label))
                 continue
             ok = browser_core.clear_browsing_history(path, lambda m, n=label: log(f"[{n}] {m}"))
-            log(f"{label}: {'done' if ok else 'failed'}")
+            log(i18n.t("br.log.result", label=label, result=i18n.t("common.done" if ok else "common.failed")))
         self._ui(self.check_browser_status)
 
     def flush_dns(self):
@@ -936,18 +959,18 @@ class CleanerApp:
     # ------------------------------------------------------------------
     def _build_startup_tab(self):
         frame = self.tab_startup
-        ttk.Label(frame, text="Programs that launch automatically when Windows starts.", style="Muted.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
-        ttk.Label(frame, text="Disabling here is reversible — you can always re-enable from this list.", style="Muted.TLabel").pack(anchor="w", padx=10)
+        ttk.Label(frame, text=i18n.t("st.desc1"), style="Muted.TLabel").pack(anchor="w", padx=10, pady=(10, 0))
+        ttk.Label(frame, text=i18n.t("st.desc2"), style="Muted.TLabel").pack(anchor="w", padx=10)
 
         btn_row = ttk.Frame(frame)
         btn_row.pack(anchor="w", padx=10, pady=5)
-        ttk.Button(btn_row, text="Refresh", command=self.refresh_startup_items).pack(side="left")
-        ttk.Button(btn_row, text="Disable Selected", command=self.disable_selected_startup).pack(side="left", padx=5)
-        ttk.Button(btn_row, text="Enable Selected", command=self.enable_selected_startup).pack(side="left")
+        ttk.Button(btn_row, text=i18n.t("st.refresh"), command=self.refresh_startup_items).pack(side="left")
+        ttk.Button(btn_row, text=i18n.t("st.disable"), command=self.disable_selected_startup).pack(side="left", padx=5)
+        ttk.Button(btn_row, text=i18n.t("st.enable"), command=self.enable_selected_startup).pack(side="left")
 
         columns = ("name", "source", "status")
         self.startup_tree = ttk.Treeview(frame, columns=columns, show="headings", height=9, selectmode="extended")
-        for col, label in zip(columns, ("Name", "Location", "Status"), strict=True):
+        for col, label in zip(columns, (i18n.t("st.col.name"), i18n.t("st.col.location"), i18n.t("st.col.status")), strict=True):
             self.startup_tree.heading(col, text=label)
         self.startup_tree.pack(fill="both", expand=True, padx=10, pady=5)
 
@@ -966,9 +989,9 @@ class CleanerApp:
         self.startup_items = items
         self.startup_tree.delete(*self.startup_tree.get_children())
         for idx, item in enumerate(items):
-            status = "Enabled" if item["enabled"] else "Disabled"
+            status = i18n.t("st.enabled") if item["enabled"] else i18n.t("st.disabled")
             self.startup_tree.insert("", "end", iid=str(idx), values=(item["name"], item["source"], status))
-        self.startup_log.log(f"Found {len(items)} startup item(s).")
+        self.startup_log.log(i18n.t("st.found", n=len(items)))
 
     def _selected_startup_items(self):
         sel = self.startup_tree.selection()
@@ -977,7 +1000,7 @@ class CleanerApp:
     def disable_selected_startup(self):
         items = [i for i in self._selected_startup_items() if i["enabled"]]
         if not items:
-            messagebox.showinfo("Nothing selected", "Select one or more enabled items first.")
+            messagebox.showinfo(i18n.t("common.nothing_selected"), i18n.t("st.select_enabled"))
             return
         threading.Thread(target=self._run_safely, args=(self._disable_startup_worker, items,), daemon=True).start()
 
@@ -985,13 +1008,13 @@ class CleanerApp:
         log = lambda m: self._ui(self.startup_log.log, m)
         for item in items:
             ok = startup_manager.disable_startup_item(item, log)
-            log(f"{item['name']}: {'disabled' if ok else 'failed'}")
+            log(i18n.t("st.log.result", name=item["name"], result=i18n.t("st.res.disabled" if ok else "common.failed")))
         self._ui(self.refresh_startup_items)
 
     def enable_selected_startup(self):
         items = [i for i in self._selected_startup_items() if not i["enabled"]]
         if not items:
-            messagebox.showinfo("Nothing selected", "Select one or more disabled items first.")
+            messagebox.showinfo(i18n.t("common.nothing_selected"), i18n.t("st.select_disabled"))
             return
         threading.Thread(target=self._run_safely, args=(self._enable_startup_worker, items,), daemon=True).start()
 
@@ -999,7 +1022,7 @@ class CleanerApp:
         log = lambda m: self._ui(self.startup_log.log, m)
         for item in items:
             ok = startup_manager.enable_startup_item(item, log)
-            log(f"{item['name']}: {'enabled' if ok else 'failed'}")
+            log(i18n.t("st.log.result", name=item["name"], result=i18n.t("st.res.enabled" if ok else "common.failed")))
         self._ui(self.refresh_startup_items)
 
 
@@ -1076,6 +1099,10 @@ def main():
     if "--auto-clean" in sys.argv:
         run_auto_clean()
         return
+    try:
+        i18n.set_language(settings.get_language())
+    except Exception:
+        pass   # fall back to the default language rather than not starting
     root = tk.Tk()
     try:
         app = CleanerApp(root)
@@ -1091,10 +1118,8 @@ def main():
             pass
         try:
             messagebox.showerror(
-                "চালু করা যায়নি",
-                f"PC Cleaner চালু করতে সমস্যা হয়েছে।\n\n{type(exc).__name__}: {exc}\n\n"
-                "বিস্তারিত error_log.json ফাইলে সংরক্ষিত হয়েছে — এই ফাইলটা Claude-কে "
-                "দেখালে দ্রুত ঠিক করে দেওয়া সম্ভব।"
+                i18n.t("err.start_title"),
+                i18n.t("err.start_body", kind=type(exc).__name__, err=exc),
             )
         except Exception:
             pass

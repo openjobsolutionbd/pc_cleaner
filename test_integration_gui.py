@@ -12,6 +12,7 @@ Run with: python -m unittest test_integration_gui.py -v
 """
 
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -21,6 +22,17 @@ import tkinter as tk
 
 import pc_cleaner as wc
 import history_log
+import i18n
+
+
+def setUpModule():
+    # The tests below check English wording; the app itself defaults to
+    # Bangla. (test_i18n.py and the language-switch tests cover Bangla.)
+    i18n.set_language("en")
+
+
+def tearDownModule():
+    i18n.set_language(i18n.DEFAULT_LANG)
 
 
 class TestCleanJunkWorkerIntegration(unittest.TestCase):
@@ -314,6 +326,135 @@ class TestUiQueueSurvivesAFailingCallback(unittest.TestCase):
         self._pump()
         self.assertTrue(self.record.called, "error must still reach the error log")
         self.assertTrue(self.warn.called, "user must still see the notice")
+
+
+class TestLanguageSwitch(unittest.TestCase):
+    """The Bangla <-> English button rebuilds the screen in the other
+    language, remembers the choice, and waits while a job is running.
+    """
+
+    def setUp(self):
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as e:
+            self.skipTest(f"No display available to run the GUI: {e}")
+        self._key_shape = re.compile(r"^[a-z]+(\.[a-z0-9_]+)+$")
+        self.tmp = tempfile.mkdtemp()
+        self.settings_path = os.path.join(self.tmp, "settings.json")
+        self._p1 = unittest.mock.patch.object(wc.settings, "default_path", lambda: self.settings_path)
+        self._p1.start()
+        i18n.set_language("en")
+        self.app = wc.CleanerApp(self.root)
+
+    def tearDown(self):
+        self.app.shutdown()
+        self.root.destroy()
+        self._p1.stop()
+        i18n.set_language("en")
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _tab_titles(self):
+        nb = self.app.tab_quick.master
+        return [nb.tab(t, "text") for t in nb.tabs()]
+
+    def _all_visible_texts(self):
+        texts = []
+
+        def walk(w):
+            try:
+                texts.append(str(w.cget("text")))
+            except tk.TclError:
+                pass
+            for child in w.winfo_children():
+                walk(child)
+
+        walk(self.root)
+        texts.extend(self._tab_titles())
+        for col in self.app.startup_tree["columns"]:
+            texts.append(self.app.startup_tree.heading(col, "text"))
+        return texts
+
+    def test_switch_to_bangla_rebuilds_the_screen(self):
+        self.app.toggle_language()
+        self.assertEqual(i18n.get_language(), "bn")
+        self.assertEqual(self._tab_titles(), [
+            i18n.t("tab.quick"), i18n.t("tab.junk"), i18n.t("tab.browser"), i18n.t("tab.startup"),
+        ])
+        self.assertEqual(self.app.quick_clean_btn["text"], i18n.t("quick.button"))
+        self.assertNotEqual(self.app.quick_clean_btn["text"], "Clean Now")
+
+    def test_switch_back_to_english(self):
+        self.app.toggle_language()
+        self.app.toggle_language()
+        self.assertEqual(i18n.get_language(), "en")
+        self.assertEqual(self.app.quick_clean_btn["text"], "Clean Now")
+        self.assertIn("Startup Manager", self._tab_titles())
+
+    def test_choice_is_remembered_in_the_settings_file(self):
+        self.app.toggle_language()
+        self.assertEqual(wc.settings.get_language(self.settings_path), "bn")
+        self.app.toggle_language()
+        self.assertEqual(wc.settings.get_language(self.settings_path), "en")
+
+    def test_screen_still_works_after_the_rebuild(self):
+        self.app.toggle_language()
+        self.assertTrue(hasattr(self.app, "startup_tree"))
+        self.assertEqual(len(self.app.category_vars), len(self.app.categories))
+        self.assertEqual(len(self.app.tab_quick.master.tabs()), 4)
+
+    def test_switch_waits_while_a_job_is_running(self):
+        self.app._active_jobs = 1
+        with unittest.mock.patch.object(wc.messagebox, "showinfo") as info:
+            self.app.toggle_language()
+        self.assertTrue(info.called)
+        self.assertEqual(i18n.get_language(), "en", "language must not change mid-job")
+        self.app._active_jobs = 0
+
+    def test_a_failing_settings_save_does_not_block_the_switch(self):
+        with unittest.mock.patch.object(wc.settings, "set_language", side_effect=OSError("disk full")):
+            self.app.toggle_language()
+        self.assertEqual(i18n.get_language(), "bn")
+
+    def test_job_counter_goes_up_during_a_job_and_back_down_after(self):
+        seen = []
+        self.app._run_safely(lambda: seen.append(self.app._active_jobs))
+        self.assertEqual(seen, [1])
+        self.assertEqual(self.app._active_jobs, 0)
+
+    def test_job_counter_comes_back_down_even_when_the_job_fails(self):
+        def boom():
+            raise RuntimeError("boom")
+
+        with unittest.mock.patch.object(wc.error_log, "record", return_value=True):
+            self.app._run_safely(boom)
+        self.assertEqual(self.app._active_jobs, 0)
+
+    def test_no_raw_translation_keys_are_ever_shown(self):
+        for lang in ("en", "bn", "en"):
+            if i18n.get_language() != lang:
+                self.app.toggle_language()
+            with self.subTest(lang=lang):
+                shown = [t for t in self._all_visible_texts() if self._key_shape.match(t.strip())]
+                self.assertEqual(shown, [])
+
+    def test_junk_category_labels_follow_the_language(self):
+        user_temp = next(c for c in self.app.categories if c["id"] == "user_temp")
+        self.assertEqual(i18n.cat_name(user_temp), user_temp["name"])   # English == the data
+        self.app.toggle_language()
+        self.assertNotEqual(i18n.cat_name(user_temp), user_temp["name"])
+
+    def test_every_category_has_translated_text_matching_the_english_data(self):
+        i18n.set_language("en")
+        for cat in wc.build_full_categories():
+            with self.subTest(category=cat["id"]):
+                self.assertEqual(i18n.cat_name(cat), cat["name"])
+                self.assertEqual(i18n.cat_desc(cat), cat["desc"])
+
+    def test_quick_clean_messages_are_shown_in_bangla_after_the_switch(self):
+        self.app.toggle_language()
+        self.app._refresh_quick_last_cleaned()
+        shown = self.app.quick_last_cleaned_label["text"]
+        self.assertTrue(any("\u0980" <= ch <= "\u09FF" for ch in shown), shown)
 
 
 class TestTabStructure(unittest.TestCase):
